@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "config.h"
 #include "version.h"
+#include "logger.h"
 
 #include <PsychicHttp.h>
 #include <PsychicHttpsServer.h>
@@ -122,6 +123,7 @@ static String navBar() {
     return R"(<nav>
       <a href="/settings">Einstellungen</a>
       <a href="/update">Firmware-Update</a>
+      <a href="/monitor">Monitor</a>
       <a href="/logout">Abmelden</a>
     </nav>)";
 }
@@ -491,6 +493,130 @@ static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
     return true;
 }
 
+// ─── GET /cert ────────────────────────────────────────────────────────────────
+// Serves the self-signed certificate PEM for download / browser import.
+static esp_err_t handleCert(PsychicRequest* req, PsychicResponse* res) {
+    if (g_certPEM.isEmpty()) {
+        return res->send(503, "text/plain", "Kein Zertifikat verfügbar.");
+    }
+    res->setCode(200);
+    res->setContentType("application/x-pem-file");
+    res->addHeader("Content-Disposition",
+                   "attachment; filename=\"qrreader.pem\"");
+    return res->send(200, "application/x-pem-file", g_certPEM.c_str());
+}
+
+// ─── GET /monitor ─────────────────────────────────────────────────────────────
+static esp_err_t handleMonitor(PsychicRequest* req, PsychicResponse* res) {
+    if (!isAuthenticated(req)) return res->redirect("/login");
+
+    // Full-page layout (wider than the card template)
+    static const char html[] = R"mon(<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monitor – QR Reader</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}
+h1{font-size:1.3rem;margin-bottom:12px;color:#a9c4e4}
+nav{margin-bottom:12px;font-size:.85rem}
+nav a{margin-right:14px;color:#569cd6;text-decoration:none}
+nav a:hover{text-decoration:underline}
+#log{background:#0d0d1a;border:1px solid #2a2a4a;border-radius:6px;
+  padding:10px 14px;height:calc(100vh - 140px);overflow-y:auto;
+  font-family:monospace;font-size:.82rem;line-height:1.55}
+.entry{white-space:pre-wrap;word-break:break-all}
+.ts{color:#6a9955}.cat-QR{color:#4ec9b0}.cat-HTTP{color:#ce9178}
+.cat-ERR{color:#f48771}.cat-WIFI{color:#569cd6}.cat-SYS{color:#9cdcfe}
+.cat-default{color:#d7ba7d}
+#statusbar{margin-top:6px;font-size:.75rem;color:#555;display:flex;
+  justify-content:space-between;align-items:center}
+#dl-cert{color:#4ec9b0;font-size:.8rem;text-decoration:none}
+#dl-cert:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<nav>
+  <a href="/settings">Einstellungen</a>
+  <a href="/update">Firmware-Update</a>
+  <a href="/monitor">Monitor</a>
+  <a href="/logout">Abmelden</a>
+</nav>
+<h1>Monitor</h1>
+<div id="log"></div>
+<div id="statusbar">
+  <span id="status">Verbinde…</span>
+  <a href="/cert" id="dl-cert">&#11015; Zertifikat herunterladen</a>
+</div>
+<script>
+var since=0, paused=false;
+var logEl=document.getElementById('log');
+var statusEl=document.getElementById('status');
+
+function fmtTs(ms){
+  var s=Math.floor(ms/1000),h=Math.floor(s/3600),
+      m=Math.floor((s%3600)/60),ss=s%60;
+  return [h,m,ss].map(function(x){return String(x).padStart(2,'0')}).join(':');
+}
+var catClass={QR:'cat-QR',HTTP:'cat-HTTP',ERR:'cat-ERR',WIFI:'cat-WIFI',SYS:'cat-SYS'};
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function appendEntries(arr){
+  if(!arr.length)return;
+  var atBottom=logEl.scrollHeight-logEl.scrollTop<=logEl.clientHeight+40;
+  var frag=document.createDocumentFragment();
+  arr.forEach(function(e){
+    var d=document.createElement('div');
+    d.className='entry';
+    var cc=catClass[e.c]||'cat-default';
+    d.innerHTML='<span class="ts">['+fmtTs(e.t)+']</span> '
+      +'<span class="'+cc+'">['+esc(e.c)+']</span> '+esc(e.m);
+    frag.appendChild(d);
+    since=e.i+1;
+  });
+  logEl.appendChild(frag);
+  if(atBottom && !paused) logEl.scrollTop=logEl.scrollHeight;
+}
+
+logEl.addEventListener('scroll',function(){
+  paused=(logEl.scrollHeight-logEl.scrollTop>logEl.clientHeight+60);
+});
+
+function poll(){
+  fetch('/monitor/log?since='+since)
+    .then(function(r){return r.json();})
+    .then(function(data){
+      appendEntries(data);
+      statusEl.textContent='Letzte Aktualisierung: '+new Date().toLocaleTimeString()
+        +(paused?' (pausiert – scrollen zum Fortfahren)':'');
+    })
+    .catch(function(){statusEl.textContent='Verbindungsfehler';});
+}
+poll();
+setInterval(poll,2000);
+</script>
+</body>
+</html>)mon";
+
+    return res->send(200, "text/html", html);
+}
+
+// ─── GET /monitor/log ─────────────────────────────────────────────────────────
+static esp_err_t handleMonitorLog(PsychicRequest* req, PsychicResponse* res) {
+    if (!isAuthenticated(req)) return res->send(401, "application/json", "[]");
+
+    uint32_t since = 0;
+    if (req->hasParam("since")) {
+        since = (uint32_t)req->getParam("since")->value().toInt();
+    }
+
+    String json = AppLogger.getJson(since);
+    res->addHeader("Cache-Control", "no-store");
+    return res->send(200, "application/json", json.c_str());
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Route registration
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -507,6 +633,9 @@ static void registerRoutes(PsychicHttpServer* srv) {
     srv->on("/update",   HTTP_GET,  handleUpdateGet);
     srv->on("/reset",    HTTP_GET,  handleResetGet);
     srv->on("/reset/factory", HTTP_POST, handleResetFactory);
+    srv->on("/cert",         HTTP_GET,  handleCert);
+    srv->on("/monitor",      HTTP_GET,  handleMonitor);
+    srv->on("/monitor/log",  HTTP_GET,  handleMonitorLog);
     srv->on("/version",  HTTP_GET,  [](PsychicRequest* req, PsychicResponse* res) {
         return res->send(200, "application/json",
             "{\"version\":\"" FW_VERSION "\"}");
@@ -574,7 +703,7 @@ void WebServerManager::begin() {
         // ── HTTPS server (port 443) ──────────────────────────────────────────
         httpsServer = new PsychicHttpsServer(443);
         httpsServer->setCertificate(g_certPEM.c_str(), g_keyPEM.c_str());
-        httpsServer->config.max_uri_handlers = 20;
+        httpsServer->config.max_uri_handlers = 24;
         httpsServer->begin();
         registerRoutes(httpsServer);
 

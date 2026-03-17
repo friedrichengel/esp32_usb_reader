@@ -12,6 +12,9 @@ Ein PlatformIO/Arduino-Projekt für den **ESP32-S3 DevKitC-1**, das einen per US
 - **Selbst-signiertes TLS-Zertifikat** – wird beim ersten Start automatisch generiert (RSA-2048, 40 Jahre Gültigkeit) und dauerhaft in NVS gespeichert; HTTP Port 80 leitet auf HTTPS um
 - **Erster Start** – Benutzer wird beim ersten Aufruf angelegt; Passwort wird nur als SHA-256-Hash gespeichert
 - **OTA-Update** – zwei App-Partitionen ermöglichen sicheres Firmware-Update über den Browser
+- **Live-Monitor** (`/monitor`) – zeigt QR-Scans, HTTP-Trigger und Systemereignisse als Live-Log im Browser (JS-Polling, kein Neuladen)
+- **Zertifikat-Download** (`/cert`) – selbst-signiertes Zertifikat als `.pem` herunterladen und im Browser/System installieren
+- **Firmware-Version** (`/version`) – liefert die aktuelle Version als JSON; Version ist in `src/version.h` definiert
 - **mDNS** – erreichbar als `https://qrreader.local`
 - **Fallback-AP** – ist kein WLAN konfiguriert oder die Verbindung schlägt fehl, öffnet der ESP32-S3 einen eigenen Access Point
 
@@ -98,7 +101,33 @@ Alle Routen laufen über **HTTPS (Port 443)**. HTTP (Port 80) leitet permanent a
 | `/logout` | – | Sitzung beenden |
 | `/settings` | Login erforderlich | WLAN, URL, Passwort ändern |
 | `/update` | Login erforderlich | OTA-Firmware-Upload |
+| `/monitor` | Login erforderlich | Live-Log-Anzeige (QR-Scans, HTTP-Aufrufe, System) |
+| `/monitor/log?since=N` | Login erforderlich | JSON-API: Logeinträge ab Index N |
+| `/cert` | Öffentlich | Selbst-signiertes Zertifikat als `.pem` herunterladen |
+| `/version` | Öffentlich | Firmware-Version als JSON: `{"version":"1.0.0"}` |
 | `/reset` | Siehe unten | Werksreset |
+
+### Zertifikat installieren
+
+Um die Browser-Warnung dauerhaft zu vermeiden, kann das Zertifikat unter `/cert` heruntergeladen und manuell als vertrauenswürdig hinterlegt werden:
+
+- **Windows:** Doppelklick auf `.pem` → „Zertifikat installieren" → „Lokaler Computer" → „Vertrauenswürdige Stammzertifizierungsstellen"
+- **macOS:** Keychain Access → Datei importieren → Vertrauen auf „Immer vertrauen" setzen
+- **Android / iOS:** `.pem`-Datei öffnen und als CA-Zertifikat installieren
+
+### Monitor (`/monitor`)
+
+Die Monitor-Seite zeigt alle Ereignisse in Echtzeit an (Polling alle 2 Sekunden, kein Seitenneulade):
+
+| Kategorie | Inhalt |
+|---|---|
+| `QR` | Gescannter QR-Code-Inhalt |
+| `HTTP` | URL + HTTP-Statuscode bei jedem Trigger-Aufruf |
+| `WIFI` | WLAN-Ereignisse |
+| `SYS` | Systemereignisse |
+| `ERR` | Fehler |
+
+Der Ringpuffer speichert die letzten **100 Einträge** im RAM (kein Verlust nach Neustart ist nicht garantiert – für Persistenz wäre SPIFFS nötig).
 
 ---
 
@@ -169,10 +198,12 @@ Nach dem Login unter `/settings` die WLAN-Zugangsdaten (SSID + Passwort) eintrag
 ├── partitions.csv        # Partitionstabelle (2× OTA)
 └── src/
     ├── main.cpp          # Setup, WiFi, Haupt-Loop
-    ├── config.h/.cpp     # Einstellungen (NVS / Preferences), SHA-256
+    ├── config.h/.cpp        # Einstellungen (NVS / Preferences), SHA-256
     ├── usb_hid_host.h/.cpp  # USB-Host-Stack (ESP-IDF), HID-Report-Parser
     ├── http_caller.h/.cpp   # HTTP-GET mit URL-Encoding
-    ├── web_server.h/.cpp    # Async-Webserver, Login, OTA, Reset
+    ├── web_server.h/.cpp    # Async-Webserver, Login, OTA, Reset, Monitor
+    ├── logger.h/.cpp        # Ringpuffer-Logger (100 Einträge, Thread-safe)
+    └── version.h            # Firmware-Version (FW_VERSION)
 ```
 
 ---
@@ -187,4 +218,4 @@ Nach dem Login unter `/settings` die WLAN-Zugangsdaten (SSID + Passwort) eintrag
 
 ## SSL-Hinweis
 
-Da das Zertifikat selbst-signiert ist, zeigt jeder Browser eine Sicherheitswarnung. Das Zertifikat muss **einmalig** manuell als Ausnahme akzeptiert werden. Alternativ kann das erzeugte Zertifikat aus dem seriellen Monitor exportiert und im Browser als vertrauenswürdig hinterlegt werden.
+Da das Zertifikat selbst-signiert ist, zeigt jeder Browser eine Sicherheitswarnung. Das Zertifikat kann über **`/cert`** als `.pem`-Datei heruntergeladen und einmalig im Betriebssystem oder Browser als vertrauenswürdig hinterlegt werden (Details siehe Abschnitt „Zertifikat installieren" oben). Danach erscheint keine Warnung mehr.

@@ -6,6 +6,7 @@
 #include "usb_hid_host.h"
 #include "http_caller.h"
 #include "web_server.h"
+#include "logger.h"
 
 // ─── WiFi connection ──────────────────────────────────────────────────────────
 static void connectWiFi() {
@@ -52,6 +53,7 @@ static void connectWiFi() {
 // ─── QR scan callback ─────────────────────────────────────────────────────────
 static void onQRScanned(const String& data) {
     Serial.printf("[QR] Scanned: %s\n", data.c_str());
+    AppLogger.add("QR", "Scan: %s", data.c_str());
     HTTPCaller::call(Config.baseURL, Config.urlParam, data);
 }
 

@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "config.h"
+#include "version.h"
 
 #include <PsychicHttp.h>
 #include <PsychicHttpsServer.h>
@@ -506,6 +507,10 @@ static void registerRoutes(PsychicHttpServer* srv) {
     srv->on("/update",   HTTP_GET,  handleUpdateGet);
     srv->on("/reset",    HTTP_GET,  handleResetGet);
     srv->on("/reset/factory", HTTP_POST, handleResetFactory);
+    srv->on("/version",  HTTP_GET,  [](PsychicRequest* req, PsychicResponse* res) {
+        return res->send(200, "application/json",
+            "{\"version\":\"" FW_VERSION "\"}");
+    });
 
     // ── OTA upload via multipart/form-data ──────────────────────────────────
     PsychicUploadHandler* otaHandler = new PsychicUploadHandler();

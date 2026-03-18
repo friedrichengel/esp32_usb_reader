@@ -15,6 +15,7 @@
 #include <new>
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
+#include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
@@ -92,6 +93,7 @@ static String page(const String& title, const String& body) {
     return String(R"(<!DOCTYPE html><html lang="de">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>)") + title + R"(</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='white'/%3E%3Crect x='1' y='1' width='5' height='5' fill='black'/%3E%3Crect x='2' y='2' width='3' height='3' fill='white'/%3E%3Crect x='3' y='3' width='1' height='1' fill='black'/%3E%3Crect x='10' y='1' width='5' height='5' fill='black'/%3E%3Crect x='11' y='2' width='3' height='3' fill='white'/%3E%3Crect x='12' y='3' width='1' height='1' fill='black'/%3E%3Crect x='1' y='10' width='5' height='5' fill='black'/%3E%3Crect x='2' y='11' width='3' height='3' fill='white'/%3E%3Crect x='3' y='12' width='1' height='1' fill='black'/%3E%3C/svg%3E">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:sans-serif;background:#f0f2f5;display:flex;justify-content:center;padding:40px 16px}
@@ -138,39 +140,71 @@ static String param(PsychicRequest* req, const char* name) {
 //  Route handlers
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Forward declarations (handlers are defined below but called from handleRoot)
+static esp_err_t handleSetupGet(PsychicRequest*, PsychicResponse*);
+static esp_err_t handleLoginGet(PsychicRequest*, PsychicResponse*);
+static esp_err_t handleSettingsGet(PsychicRequest*, PsychicResponse*);
+
+// ─── Request logger ───────────────────────────────────────────────────────────
+static void logRequest(PsychicRequest* req) {
+    const char* m = (req->method() == HTTP_GET)  ? "GET"  :
+                    (req->method() == HTTP_POST)  ? "POST" :
+                    (req->method() == HTTP_DELETE)? "DEL"  : "???";
+    Serial.printf("[Web] %s %s\n", m, req->uri().c_str());
+    AppLogger.add("WEB", "%s %s", m, req->uri().c_str());
+}
+
 // ─── GET / ────────────────────────────────────────────────────────────────────
+// Serve the target page DIRECTLY instead of redirecting.
+// A redirect would require the browser to open a NEW TLS connection; on
+// self-signed certs this second handshake often fails with a fatal alert.
 static esp_err_t handleRoot(PsychicRequest* req, PsychicResponse* res) {
-    return res->redirect(Config.setupDone ? "/settings" : "/setup");
+    logRequest(req);
+    if (!Config.setupDone)     return handleSetupGet(req, res);
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
+    return handleSettingsGet(req, res);
 }
 
 // ─── GET /setup ───────────────────────────────────────────────────────────────
 static esp_err_t handleSetupGet(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (Config.setupDone) return res->redirect("/login");
 
-    String mac  = getMac();
-    String body = R"(<h1>Ersteinrichtung</h1>
-<div class="msg warn">
-  <strong>Wichtig:</strong> Notieren Sie sich Ihre MAC-Adresse:<br>
-  <span class="mac">)" + mac + R"(</span><br><br>
-  Falls Sie Ihr Passwort vergessen, können Sie sich auf der
-  Reset-Seite (<code>/reset</code>) mit der MAC-Adresse als
-  Benutzername <em>und</em> Passwort anmelden, um das Gerät
-  zurückzusetzen. <strong>Bitte MAC-Adresse sicher aufbewahren!</strong>
-</div>
-<form method="POST" action="/setup">
-  <label>Benutzername</label>
-  <input type="text" name="username" required autocomplete="username">
-  <label>Passwort</label>
-  <input type="password" name="password" required minlength="6" autocomplete="new-password">
-  <label>Passwort bestätigen</label>
-  <input type="password" name="password2" required autocomplete="new-password">
-  <button type="submit" class="btn">Konto erstellen</button>
-</form>)";
+    String mac = getMac();
+
+    String body;
+    body.reserve(1400);
+    body  = F("<h1>Ersteinrichtung</h1>");
+
+    // ── MAC / Reset-Hinweis ──────────────────────────────────────────────────
+    body += F("<div class=\"msg warn\">"
+              "<strong>Wichtig &ndash; MAC-Adresse notieren:</strong><br>"
+              "<span class=\"mac\">");
+    body += mac;
+    body += F("</span><br><br>"
+              "Falls Sie Ihr Passwort vergessen, k&ouml;nnen Sie sich auf der "
+              "Reset-Seite (<code>/reset</code>) mit der MAC-Adresse als "
+              "Benutzername <em>und</em> Passwort anmelden."
+              " <strong>Bitte sicher aufbewahren!</strong>"
+              "</div>");
+
+    // ── Formular ─────────────────────────────────────────────────────────────
+    body += F("<form method=\"POST\" action=\"/setup\" style=\"margin-top:16px\">"
+              "<label>Benutzername</label>"
+              "<input type=\"text\" name=\"username\" required autocomplete=\"username\">"
+              "<label>Passwort</label>"
+              "<input type=\"password\" name=\"password\" required minlength=\"6\" autocomplete=\"new-password\">"
+              "<label>Passwort best&auml;tigen</label>"
+              "<input type=\"password\" name=\"password2\" required autocomplete=\"new-password\">"
+              "<button type=\"submit\" class=\"btn\">Konto erstellen</button>"
+              "</form>");
+
     return res->send(200, "text/html", page("Ersteinrichtung", body).c_str());
 }
 
 // ─── POST /setup ──────────────────────────────────────────────────────────────
 static esp_err_t handleSetupPost(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (Config.setupDone) return res->redirect("/login");
 
     String user  = param(req, "username"); user.trim();
@@ -198,26 +232,34 @@ static esp_err_t handleSetupPost(PsychicRequest* req, PsychicResponse* res) {
     return loginAndRedirect(res, "/settings");
 }
 
+// ─── Login page helper ────────────────────────────────────────────────────────
+static esp_err_t sendLoginPage(PsychicResponse* res, bool failed = false) {
+    String body;
+    body.reserve(512);
+    body  = "<h1>Anmeldung</h1>";
+    if (failed)
+        body += "<p class=\"msg err\">Ung&uuml;ltiger Benutzername oder Passwort.</p>";
+    body += "<form method=\"POST\" action=\"/login\">"
+            "<label>Benutzername</label>"
+            "<input type=\"text\" name=\"username\" required autocomplete=\"username\">"
+            "<label>Passwort</label>"
+            "<input type=\"password\" name=\"password\" required autocomplete=\"current-password\">"
+            "<button type=\"submit\" class=\"btn\">Anmelden</button>"
+            "</form>";
+    return res->send(failed ? 401 : 200, "text/html", page("Login", body).c_str());
+}
+
 // ─── GET /login ───────────────────────────────────────────────────────────────
 static esp_err_t handleLoginGet(PsychicRequest* req, PsychicResponse* res) {
-    if (!Config.setupDone)      return res->redirect("/setup");
-    if (isAuthenticated(req))   return res->redirect("/settings");
-
-    bool failed = req->hasParam("err");
-    String msg  = failed ? R"(<p class="msg err">Ung&uuml;ltige Zugangsdaten.</p>)" : "";
-    String body = "<h1>Anmeldung</h1>" + msg + R"(
-<form method="POST" action="/login">
-  <label>Benutzername</label>
-  <input type="text" name="username" required autocomplete="username">
-  <label>Passwort</label>
-  <input type="password" name="password" required autocomplete="current-password">
-  <button type="submit" class="btn">Anmelden</button>
-</form>)";
-    return res->send(200, "text/html", page("Login", body).c_str());
+    logRequest(req);
+    if (!Config.setupDone)    return res->redirect("/setup");
+    if (isAuthenticated(req)) return res->redirect("/settings");
+    return sendLoginPage(res);
 }
 
 // ─── POST /login ──────────────────────────────────────────────────────────────
 static esp_err_t handleLoginPost(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     String user = param(req, "username");
     String pass = param(req, "password");
 
@@ -225,11 +267,16 @@ static esp_err_t handleLoginPost(PsychicRequest* req, PsychicResponse* res) {
         ConfigManager::sha256(pass) == Config.adminPassHash) {
         return loginAndRedirect(res, "/settings");
     }
-    return res->redirect("/login?err=1");
+    // Wrong credentials: render login form directly with error message.
+    // No redirect → no new TLS connection needed.
+    Serial.println("[Web] Login failed");
+    AppLogger.add("WEB", "Login fehlgeschlagen: user=%s", user.c_str());
+    return sendLoginPage(res, true);
 }
 
 // ─── GET /logout ──────────────────────────────────────────────────────────────
 static esp_err_t handleLogout(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     String token = req->getCookie("session");
     if (!token.isEmpty()) sessions.erase(token);
 
@@ -242,6 +289,7 @@ static esp_err_t handleLogout(PsychicRequest* req, PsychicResponse* res) {
 
 // ─── GET /settings ────────────────────────────────────────────────────────────
 static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (!isAuthenticated(req)) return res->redirect("/login");
 
     bool saved  = req->hasParam("saved");
@@ -274,13 +322,20 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
 </form>
 <p style="margin-top:16px;font-size:.82rem;color:#999">
   Reset: <a href="/reset">/reset</a>
-</p>)delim";
+</p>)delim"
+    + String(F("<div class=\"msg warn\" style=\"margin-top:16px\">"
+               "Das Zertifikat ist selbst-signiert. Um die Browser-Warnung dauerhaft "
+               "zu vermeiden, Zertifikat herunterladen und im System installieren:<br>"
+               "<a href=\"/cert\" style=\"display:block;margin-top:8px;color:#2563eb\">"
+               "&#11015; Zertifikat herunterladen (qrreader.pem)"
+               "</a></div>"));
 
     return res->send(200, "text/html", page("Einstellungen", body).c_str());
 }
 
 // ─── POST /settings ───────────────────────────────────────────────────────────
 static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (!isAuthenticated(req)) return res->redirect("/login");
 
     String ssid    = param(req, "wifi_ssid");
@@ -311,6 +366,7 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
 
 // ─── GET /update ──────────────────────────────────────────────────────────────
 static esp_err_t handleUpdateGet(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (!isAuthenticated(req)) return res->redirect("/login");
 
     String partition = String(esp_ota_get_running_partition()->label);
@@ -330,6 +386,7 @@ static esp_err_t handleUpdateGet(PsychicRequest* req, PsychicResponse* res) {
 
 // ─── GET /reset ───────────────────────────────────────────────────────────────
 static esp_err_t handleResetGet(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     bool authed = isAuthenticated(req);
     bool failed = req->hasParam("err");
     String mac  = getMac();
@@ -366,6 +423,7 @@ static esp_err_t handleResetGet(PsychicRequest* req, PsychicResponse* res) {
 
 // ─── POST /reset/factory ──────────────────────────────────────────────────────
 static esp_err_t handleResetFactory(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     bool authed = isAuthenticated(req);
 
     if (!authed) {
@@ -401,10 +459,17 @@ static esp_err_t handleResetFactory(PsychicRequest* req, PsychicResponse* res) {
 #define SSL_KEY_VALID "valid"
 #define SSL_KEY_VER   "ver"
 // Bump this when cert extensions change → forces NVS regeneration on next boot
-#define SSL_CERT_VER  2
+#define SSL_CERT_VER  4
 
-static bool generateCert(String& certPEM, String& keyPEM) {
+// staIP: current STA-mode IP (may be "0.0.0.0" or empty when in AP mode).
+// The cert always contains DNS:qrreader.local + IP:192.168.4.1 (fixed AP IP).
+// If staIP is a different, valid address it is added as a third SAN so that
+// the browser does not show a certificate warning when accessing via that IP.
+static bool generateCert(String& certPEM, String& keyPEM, const String& staIP) {
     Serial.println("[SSL] Generating RSA-2048 self-signed certificate ...");
+    Serial.printf("[SSL] SANs: DNS:qrreader.local  IP:192.168.4.1%s\n",
+                  (staIP.length() && staIP != "0.0.0.0") ?
+                  ("  IP:" + staIP).c_str() : "");
     Serial.println("[SSL] This may take up to 2 minutes on first boot.");
 
     // ── Heap-allocate all large mbedTLS structures ────────────────────────────
@@ -462,20 +527,41 @@ static bool generateCert(String& certPEM, String& keyPEM) {
                     MBEDTLS_X509_KU_DIGITAL_SIGNATURE |
                     MBEDTLS_X509_KU_KEY_ENCIPHERMENT)) break;
 
-            // Subject Alternative Name: DNS:qrreader.local
-            // Required by Chrome/Firefox since RFC 6125 – without SAN the browser
-            // sends a TLS fatal alert instead of showing the "not trusted" warning.
-            // OID 2.5.29.17 = { 0x55, 0x1d, 0x11 }
-            // Value = GeneralNames SEQUENCE { [2] IMPLICIT IA5String "qrreader.local" }
+            // Subject Alternative Name via mbedTLS high-level API
+            // Always: DNS:qrreader.local + IP:192.168.4.1 (fixed AP-mode IP)
+            // Optional: IP:<staIP> if the device is in STA mode with a DHCP address
             {
-                static const char     san_oid[] = "\x55\x1d\x11";
-                static const uint8_t  san_val[] = {
-                    0x30, 0x10,   // SEQUENCE (length 16)
-                    0x82, 0x0e,   // [2] IMPLICIT IA5String – dNSName, length 14
-                    'q','r','r','e','a','d','e','r','.','l','o','c','a','l'
-                };
-                if (mbedtls_x509write_crt_set_extension(crt, san_oid, 3, 0,
-                        san_val, sizeof(san_val))) break;
+                IPAddress extra;
+                bool hasExtra = staIP.length() > 0
+                             && staIP != "0.0.0.0"
+                             && extra.fromString(staIP)
+                             && extra != IPAddress(192, 168, 4, 1);
+
+                // IP bytes – must stay alive until mbedTLS copies the data
+                uint8_t apIPBytes[4]  = { 192, 168, 4, 1 };
+                uint8_t staIPBytes[4] = { extra[0], extra[1], extra[2], extra[3] };
+
+                // Build linked list of SAN entries
+                mbedtls_x509_san_list san[3] = {};
+
+                san[0].node.type                        = MBEDTLS_X509_SAN_DNS_NAME;
+                san[0].node.san.unstructured_name.p     = (unsigned char*)"qrreader.local";
+                san[0].node.san.unstructured_name.len   = 14;
+                san[0].next                             = &san[1];
+
+                san[1].node.type                        = MBEDTLS_X509_SAN_IP_ADDRESS;
+                san[1].node.san.unstructured_name.p     = apIPBytes;
+                san[1].node.san.unstructured_name.len   = 4;
+                san[1].next                             = hasExtra ? &san[2] : nullptr;
+
+                if (hasExtra) {
+                    san[2].node.type                      = MBEDTLS_X509_SAN_IP_ADDRESS;
+                    san[2].node.san.unstructured_name.p   = staIPBytes;
+                    san[2].node.san.unstructured_name.len = 4;
+                    san[2].next                           = nullptr;
+                }
+
+                if (mbedtls_x509write_crt_set_subject_alternative_name(crt, san)) break;
             }
 
             // Extended Key Usage: id-kp-serverAuth (1.3.6.1.5.5.7.3.1)
@@ -520,13 +606,16 @@ static bool generateCert(String& certPEM, String& keyPEM) {
     return ok;
 }
 
-static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
+static bool loadOrCreateCert(String& certPEM, String& keyPEM, const String& staIP) {
     Preferences prefs;
     prefs.begin(SSL_NVS_NS, /*readOnly=*/true);
-    bool    valid  = prefs.getBool(SSL_KEY_VALID, false);
-    uint8_t verNVS = prefs.getUChar(SSL_KEY_VER, 0);
+    bool    valid    = prefs.getBool(SSL_KEY_VALID, false);
+    uint8_t verNVS   = prefs.getUChar(SSL_KEY_VER, 0);
+    String  storedIP = prefs.getString("staip", "");
+    prefs.end();
 
-    if (valid && verNVS == SSL_CERT_VER) {
+    if (valid && verNVS == SSL_CERT_VER && storedIP == staIP) {
+        prefs.begin(SSL_NVS_NS, /*readOnly=*/true);
         certPEM = prefs.getString(SSL_KEY_CERT, "");
         keyPEM  = prefs.getString(SSL_KEY_PK,   "");
         prefs.end();
@@ -535,22 +624,23 @@ static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
                           certPEM.length(), keyPEM.length());
             return true;
         }
-    } else {
-        prefs.end();
-        if (valid && verNVS != SSL_CERT_VER) {
-            Serial.printf("[SSL] Cert version mismatch (NVS=%u, expected=%u) – regenerating\n",
-                          verNVS, (uint8_t)SSL_CERT_VER);
-        }
     }
 
-    // Generate new cert
-    if (!generateCert(certPEM, keyPEM)) return false;
+    if (valid && verNVS != SSL_CERT_VER)
+        Serial.printf("[SSL] Cert version mismatch (NVS=%u, expected=%u) – regenerating\n",
+                      verNVS, (uint8_t)SSL_CERT_VER);
+    else if (valid && storedIP != staIP)
+        Serial.printf("[SSL] IP changed (%s → %s) – regenerating cert\n",
+                      storedIP.c_str(), staIP.c_str());
+
+    if (!generateCert(certPEM, keyPEM, staIP)) return false;
 
     prefs.begin(SSL_NVS_NS, /*readOnly=*/false);
     prefs.putString(SSL_KEY_CERT, certPEM);
     prefs.putString(SSL_KEY_PK,   keyPEM);
     prefs.putBool(SSL_KEY_VALID, true);
     prefs.putUChar(SSL_KEY_VER, SSL_CERT_VER);
+    prefs.putString("staip", staIP);
     prefs.end();
     Serial.println("[SSL] Cert saved to NVS.");
     return true;
@@ -559,6 +649,7 @@ static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
 // ─── GET /cert ────────────────────────────────────────────────────────────────
 // Serves the self-signed certificate PEM for download / browser import.
 static esp_err_t handleCert(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (g_certPEM.isEmpty()) {
         return res->send(503, "text/plain", "Kein Zertifikat verfügbar.");
     }
@@ -571,53 +662,28 @@ static esp_err_t handleCert(PsychicRequest* req, PsychicResponse* res) {
 
 // ─── GET /monitor ─────────────────────────────────────────────────────────────
 static esp_err_t handleMonitor(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (!isAuthenticated(req)) return res->redirect("/login");
 
-    // Full-page layout (wider than the card template)
-    static const char html[] = R"mon(<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Monitor – QR Reader</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}
-h1{font-size:1.3rem;margin-bottom:12px;color:#a9c4e4}
-nav{margin-bottom:12px;font-size:.85rem}
-nav a{margin-right:14px;color:#569cd6;text-decoration:none}
-nav a:hover{text-decoration:underline}
-#log{background:#0d0d1a;border:1px solid #2a2a4a;border-radius:6px;
-  padding:10px 14px;height:calc(100vh - 140px);overflow-y:auto;
-  font-family:monospace;font-size:.82rem;line-height:1.55}
+    String body = navBar();
+    body += R"mon(<style>
+.card{max-width:860px}
+#log{background:#1e1e1e;border:1px solid #ccc;border-radius:6px;
+  padding:10px 14px;height:450px;overflow-y:auto;
+  font-family:monospace;font-size:.82rem;line-height:1.6;color:#d4d4d4}
 .entry{white-space:pre-wrap;word-break:break-all}
 .ts{color:#6a9955}.cat-QR{color:#4ec9b0}.cat-HTTP{color:#ce9178}
 .cat-ERR{color:#f48771}.cat-WIFI{color:#569cd6}.cat-SYS{color:#9cdcfe}
 .cat-default{color:#d7ba7d}
-#statusbar{margin-top:6px;font-size:.75rem;color:#555;display:flex;
-  justify-content:space-between;align-items:center}
-#dl-cert{color:#4ec9b0;font-size:.8rem;text-decoration:none}
-#dl-cert:hover{text-decoration:underline}
+#statusbar{margin-top:8px;font-size:.78rem;color:#777}
 </style>
-</head>
-<body>
-<nav>
-  <a href="/settings">Einstellungen</a>
-  <a href="/update">Firmware-Update</a>
-  <a href="/monitor">Monitor</a>
-  <a href="/logout">Abmelden</a>
-</nav>
 <h1>Monitor</h1>
 <div id="log"></div>
-<div id="statusbar">
-  <span id="status">Verbinde…</span>
-  <a href="/cert" id="dl-cert">&#11015; Zertifikat herunterladen</a>
-</div>
+<div id="statusbar"><span id="status">Verbinde&#x2026;</span></div>
 <script>
-var since=0, paused=false;
+var since=0,paused=false;
 var logEl=document.getElementById('log');
 var statusEl=document.getElementById('status');
-
 function fmtTs(ms){
   var s=Math.floor(ms/1000),h=Math.floor(s/3600),
       m=Math.floor((s%3600)/60),ss=s%60;
@@ -625,49 +691,42 @@ function fmtTs(ms){
 }
 var catClass={QR:'cat-QR',HTTP:'cat-HTTP',ERR:'cat-ERR',WIFI:'cat-WIFI',SYS:'cat-SYS'};
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
 function appendEntries(arr){
   if(!arr.length)return;
   var atBottom=logEl.scrollHeight-logEl.scrollTop<=logEl.clientHeight+40;
   var frag=document.createDocumentFragment();
   arr.forEach(function(e){
-    var d=document.createElement('div');
-    d.className='entry';
+    var d=document.createElement('div');d.className='entry';
     var cc=catClass[e.c]||'cat-default';
     d.innerHTML='<span class="ts">['+fmtTs(e.t)+']</span> '
       +'<span class="'+cc+'">['+esc(e.c)+']</span> '+esc(e.m);
-    frag.appendChild(d);
-    since=e.i+1;
+    frag.appendChild(d);since=e.i+1;
   });
   logEl.appendChild(frag);
-  if(atBottom && !paused) logEl.scrollTop=logEl.scrollHeight;
+  if(atBottom&&!paused)logEl.scrollTop=logEl.scrollHeight;
 }
-
 logEl.addEventListener('scroll',function(){
   paused=(logEl.scrollHeight-logEl.scrollTop>logEl.clientHeight+60);
 });
-
 function poll(){
   fetch('/monitor/log?since='+since)
     .then(function(r){return r.json();})
     .then(function(data){
       appendEntries(data);
       statusEl.textContent='Letzte Aktualisierung: '+new Date().toLocaleTimeString()
-        +(paused?' (pausiert – scrollen zum Fortfahren)':'');
+        +(paused?' \u2013 pausiert (nach unten scrollen zum Fortfahren)':'');
     })
     .catch(function(){statusEl.textContent='Verbindungsfehler';});
 }
-poll();
-setInterval(poll,2000);
-</script>
-</body>
-</html>)mon";
+poll();setInterval(poll,2000);
+</script>)mon";
 
-    return res->send(200, "text/html", html);
+    return res->send(200, "text/html", page("Monitor", body).c_str());
 }
 
 // ─── GET /monitor/log ─────────────────────────────────────────────────────────
 static esp_err_t handleMonitorLog(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
     if (!isAuthenticated(req)) return res->send(401, "application/json", "[]");
 
     uint32_t since = 0;
@@ -694,6 +753,9 @@ static void registerRoutes(PsychicHttpServer* srv) {
     srv->on("/settings", HTTP_GET,  handleSettingsGet);
     srv->on("/settings", HTTP_POST, handleSettingsPost);
     srv->on("/update",   HTTP_GET,  handleUpdateGet);
+    srv->on("/favicon.ico", HTTP_GET, [](PsychicRequest* req, PsychicResponse* res) {
+        return res->send(204, "image/x-icon", "");
+    });
     srv->on("/reset",    HTTP_GET,  handleResetGet);
     srv->on("/reset/factory", HTTP_POST, handleResetFactory);
     srv->on("/cert",         HTTP_GET,  handleCert);
@@ -748,6 +810,7 @@ static void registerRoutes(PsychicHttpServer* srv) {
 
     // ── 404 ─────────────────────────────────────────────────────────────────
     srv->onNotFound([](PsychicRequest* req, PsychicResponse* res) {
+        Serial.printf("[Web] 404 %s\n", req->uri().c_str());
         return res->send(404, "text/html",
             page("404", R"(<h1>404 &ndash; Nicht gefunden</h1>
 <p>Die angeforderte Seite existiert nicht.</p>
@@ -760,13 +823,28 @@ static void registerRoutes(PsychicHttpServer* srv) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void WebServerManager::begin() {
-    bool hasCert = loadOrCreateCert(g_certPEM, g_keyPEM);
+    // Determine the current STA IP (empty string when in AP-only mode)
+    String staIP = "";
+    if (WiFi.getMode() == WIFI_MODE_STA || WiFi.getMode() == WIFI_MODE_APSTA) {
+        if (WiFi.status() == WL_CONNECTED)
+            staIP = WiFi.localIP().toString();
+    }
+
+    bool hasCert = loadOrCreateCert(g_certPEM, g_keyPEM, staIP);
 
     if (hasCert) {
         // ── HTTPS server (port 443) ──────────────────────────────────────────
         httpsServer = new PsychicHttpsServer(443);
         httpsServer->setCertificate(g_certPEM.c_str(), g_keyPEM.c_str());
-        httpsServer->config.max_uri_handlers = 24;
+        // ssl_config.httpd is the actual config used by PsychicHttpsServer::_startServer().
+        // The inherited `config` member is NOT used for HTTPS – setting it has no effect.
+        httpsServer->ssl_config.httpd.max_uri_handlers = 24;
+        // Default is 2 – far too low (Chrome opens 4–6 parallel TLS connections).
+        // Each TLS context needs ~80 KB heap; 4 is a safe limit for ESP32-S3.
+        httpsServer->ssl_config.httpd.max_open_sockets = 4;
+        // Evict the least-recently-used socket when all slots are full so new
+        // connections are handled instead of hard-rejected.
+        httpsServer->ssl_config.httpd.lru_purge_enable = true;
         httpsServer->begin();
         registerRoutes(httpsServer);
 
@@ -775,7 +853,9 @@ void WebServerManager::begin() {
         httpServer->begin();
         httpServer->onNotFound([](PsychicRequest* req, PsychicResponse* res) {
             String url = "https://" + getMyIP() + req->uri();
-            res->setCode(301);
+            Serial.printf("[Web] HTTP:80 %s → redirect %s\n",
+                          req->uri().c_str(), url.c_str());
+            res->setCode(302);
             res->addHeader("Location", url.c_str());
             return res->send();
         });

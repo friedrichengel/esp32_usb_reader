@@ -12,6 +12,7 @@
 #include <map>
 
 // mbedTLS 3.x – certificate generation
+#include <new>
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/x509_crt.h"
@@ -398,65 +399,121 @@ static esp_err_t handleResetFactory(PsychicRequest* req, PsychicResponse* res) {
 #define SSL_KEY_CERT  "cert"
 #define SSL_KEY_PK    "pk"
 #define SSL_KEY_VALID "valid"
+#define SSL_KEY_VER   "ver"
+// Bump this when cert extensions change → forces NVS regeneration on next boot
+#define SSL_CERT_VER  2
 
 static bool generateCert(String& certPEM, String& keyPEM) {
     Serial.println("[SSL] Generating RSA-2048 self-signed certificate ...");
     Serial.println("[SSL] This may take up to 2 minutes on first boot.");
 
-    mbedtls_pk_context      key;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context drbg;
-    mbedtls_x509write_cert   crt;
+    // ── Heap-allocate all large mbedTLS structures ────────────────────────────
+    // Stack-allocating these (~10+ KB total) overflows the 8 KB Arduino task stack.
+    mbedtls_pk_context*       key     = new (std::nothrow) mbedtls_pk_context;
+    mbedtls_entropy_context*  entropy = new (std::nothrow) mbedtls_entropy_context;
+    mbedtls_ctr_drbg_context* drbg    = new (std::nothrow) mbedtls_ctr_drbg_context;
+    mbedtls_x509write_cert*   crt     = new (std::nothrow) mbedtls_x509write_cert;
+    uint8_t*                  certBuf = new (std::nothrow) uint8_t[4096]();
+    uint8_t*                  keyBuf  = new (std::nothrow) uint8_t[4096]();
+
     bool ok = false;
 
-    mbedtls_pk_init(&key);
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&drbg);
-    mbedtls_x509write_crt_init(&crt);
+    if (!key || !entropy || !drbg || !crt || !certBuf || !keyBuf) {
+        Serial.println("[SSL] Out of heap memory for cert generation!");
+    } else {
+        mbedtls_pk_init(key);
+        mbedtls_entropy_init(entropy);
+        mbedtls_ctr_drbg_init(drbg);
+        mbedtls_x509write_crt_init(crt);
 
-    do {
-        const char* pers = "qrreader_ssl";
-        if (mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
-                                   (const unsigned char*)pers, strlen(pers))) break;
-        if (mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA))) break;
-        if (mbedtls_rsa_gen_key(mbedtls_pk_rsa(key),
-                                mbedtls_ctr_drbg_random, &drbg, 2048, 65537)) break;
+        // RSA-2048 keygen blocks for 30-120 s – disable task WDT for this task
+        disableLoopWDT();
 
-        mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
-        mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
-        mbedtls_x509write_crt_set_subject_key(&crt, &key);
-        mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+        do {
+            const char* pers = "qrreader_ssl";
+            if (mbedtls_ctr_drbg_seed(drbg, mbedtls_entropy_func, entropy,
+                                       (const unsigned char*)pers, strlen(pers))) break;
+            if (mbedtls_pk_setup(key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA))) break;
+            if (mbedtls_rsa_gen_key(mbedtls_pk_rsa(*key),
+                                    mbedtls_ctr_drbg_random, drbg, 2048, 65537)) break;
 
-        if (mbedtls_x509write_crt_set_subject_name(
-                &crt, "CN=qrreader.local,O=QRReader,C=DE")) break;
-        if (mbedtls_x509write_crt_set_issuer_name(
-                &crt, "CN=qrreader.local,O=QRReader,C=DE")) break;
-        // Valid 2026-01-01 → 2066-01-01  (40 years)
-        if (mbedtls_x509write_crt_set_validity(
-                &crt, "20260101000000", "20660101000000")) break;
+            mbedtls_x509write_crt_set_version(crt, MBEDTLS_X509_CRT_VERSION_3);
+            mbedtls_x509write_crt_set_md_alg(crt, MBEDTLS_MD_SHA256);
+            mbedtls_x509write_crt_set_subject_key(crt, key);
+            mbedtls_x509write_crt_set_issuer_key(crt, key);
 
-        // Serial number (mbedTLS 3.x API)
-        uint8_t serial[8] = {0x01,0x23,0x45,0x67,0x89,0xAB,0xCD,0xEF};
-        if (mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial))) break;
+            if (mbedtls_x509write_crt_set_subject_name(
+                    crt, "CN=qrreader.local,O=QRReader,C=DE")) break;
+            if (mbedtls_x509write_crt_set_issuer_name(
+                    crt, "CN=qrreader.local,O=QRReader,C=DE")) break;
+            // Valid 2026-01-01 → 2066-01-01  (40 years)
+            if (mbedtls_x509write_crt_set_validity(
+                    crt, "20260101000000", "20660101000000")) break;
 
-        // Export certificate PEM
-        uint8_t certBuf[4096] = {};
-        if (mbedtls_x509write_crt_pem(&crt, certBuf, sizeof(certBuf),
-                                       mbedtls_ctr_drbg_random, &drbg)) break;
+            // Serial number (mbedTLS 3.x API)
+            uint8_t serial[8] = {0x01,0x23,0x45,0x67,0x89,0xAB,0xCD,0xEF};
+            if (mbedtls_x509write_crt_set_serial_raw(crt, serial, sizeof(serial))) break;
 
-        // Export private key PEM
-        uint8_t keyBuf[4096] = {};
-        if (mbedtls_pk_write_key_pem(&key, keyBuf, sizeof(keyBuf))) break;
+            // Basic Constraints: not a CA
+            if (mbedtls_x509write_crt_set_basic_constraints(crt, 0, -1)) break;
 
-        certPEM = String((char*)certBuf);
-        keyPEM  = String((char*)keyBuf);
-        ok = certPEM.length() > 0 && keyPEM.length() > 0;
-    } while (false);
+            // Key Usage: Digital Signature + Key Encipherment
+            if (mbedtls_x509write_crt_set_key_usage(crt,
+                    MBEDTLS_X509_KU_DIGITAL_SIGNATURE |
+                    MBEDTLS_X509_KU_KEY_ENCIPHERMENT)) break;
 
-    mbedtls_x509write_crt_free(&crt);
-    mbedtls_pk_free(&key);
-    mbedtls_entropy_free(&entropy);
-    mbedtls_ctr_drbg_free(&drbg);
+            // Subject Alternative Name: DNS:qrreader.local
+            // Required by Chrome/Firefox since RFC 6125 – without SAN the browser
+            // sends a TLS fatal alert instead of showing the "not trusted" warning.
+            // OID 2.5.29.17 = { 0x55, 0x1d, 0x11 }
+            // Value = GeneralNames SEQUENCE { [2] IMPLICIT IA5String "qrreader.local" }
+            {
+                static const char     san_oid[] = "\x55\x1d\x11";
+                static const uint8_t  san_val[] = {
+                    0x30, 0x10,   // SEQUENCE (length 16)
+                    0x82, 0x0e,   // [2] IMPLICIT IA5String – dNSName, length 14
+                    'q','r','r','e','a','d','e','r','.','l','o','c','a','l'
+                };
+                if (mbedtls_x509write_crt_set_extension(crt, san_oid, 3, 0,
+                        san_val, sizeof(san_val))) break;
+            }
+
+            // Extended Key Usage: id-kp-serverAuth (1.3.6.1.5.5.7.3.1)
+            // OID 2.5.29.37 = { 0x55, 0x1d, 0x25 }
+            {
+                static const char     eku_oid[] = "\x55\x1d\x25";
+                static const uint8_t  eku_val[] = {
+                    0x30, 0x0a,                                  // SEQUENCE (length 10)
+                    0x06, 0x08,                                  // OID (length 8)
+                    0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01  // serverAuth
+                };
+                if (mbedtls_x509write_crt_set_extension(crt, eku_oid, 3, 0,
+                        eku_val, sizeof(eku_val))) break;
+            }
+
+            if (mbedtls_x509write_crt_pem(crt, certBuf, 4096,
+                                           mbedtls_ctr_drbg_random, drbg)) break;
+            if (mbedtls_pk_write_key_pem(key, keyBuf, 4096)) break;
+
+            certPEM = String((char*)certBuf);
+            keyPEM  = String((char*)keyBuf);
+            ok = certPEM.length() > 0 && keyPEM.length() > 0;
+        } while (false);
+
+        enableLoopWDT();
+
+        mbedtls_x509write_crt_free(crt);
+        mbedtls_pk_free(key);
+        mbedtls_entropy_free(entropy);
+        mbedtls_ctr_drbg_free(drbg);
+    }
+
+    delete key;
+    delete entropy;
+    delete drbg;
+    delete crt;
+    delete[] certBuf;
+    delete[] keyBuf;
 
     if (ok) Serial.println("[SSL] Certificate generated.");
     else    Serial.println("[SSL] Certificate generation FAILED.");
@@ -466,9 +523,10 @@ static bool generateCert(String& certPEM, String& keyPEM) {
 static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
     Preferences prefs;
     prefs.begin(SSL_NVS_NS, /*readOnly=*/true);
-    bool valid = prefs.getBool(SSL_KEY_VALID, false);
+    bool    valid  = prefs.getBool(SSL_KEY_VALID, false);
+    uint8_t verNVS = prefs.getUChar(SSL_KEY_VER, 0);
 
-    if (valid) {
+    if (valid && verNVS == SSL_CERT_VER) {
         certPEM = prefs.getString(SSL_KEY_CERT, "");
         keyPEM  = prefs.getString(SSL_KEY_PK,   "");
         prefs.end();
@@ -479,6 +537,10 @@ static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
         }
     } else {
         prefs.end();
+        if (valid && verNVS != SSL_CERT_VER) {
+            Serial.printf("[SSL] Cert version mismatch (NVS=%u, expected=%u) – regenerating\n",
+                          verNVS, (uint8_t)SSL_CERT_VER);
+        }
     }
 
     // Generate new cert
@@ -488,6 +550,7 @@ static bool loadOrCreateCert(String& certPEM, String& keyPEM) {
     prefs.putString(SSL_KEY_CERT, certPEM);
     prefs.putString(SSL_KEY_PK,   keyPEM);
     prefs.putBool(SSL_KEY_VALID, true);
+    prefs.putUChar(SSL_KEY_VER, SSL_CERT_VER);
     prefs.end();
     Serial.println("[SSL] Cert saved to NVS.");
     return true;

@@ -6,7 +6,7 @@ ConfigManager Config;
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
 ConfigManager::ConfigManager()
-    : urlParam(DEFAULT_URL_PARAM), setupDone(false) {}
+    : urlParam(DEFAULT_URL_PARAM), scanTerminator("crlf"), setupDone(false) {}
 
 // ─── load() ──────────────────────────────────────────────────────────────────
 void ConfigManager::load() {
@@ -19,6 +19,7 @@ void ConfigManager::load() {
     urlParam      = prefs.getString(KEY_URL_PARAM,  DEFAULT_URL_PARAM);
     adminUser     = prefs.getString(KEY_ADMIN_USER, "");
     adminPassHash = prefs.getString(KEY_ADMIN_HASH, "");
+    scanTerminator= prefs.getString(KEY_SCAN_TERM,  "crlf");
     setupDone     = prefs.getBool  (KEY_SETUP_DONE, false);
 
     prefs.end();
@@ -38,6 +39,7 @@ void ConfigManager::save() {
     prefs.putString(KEY_URL_PARAM,  urlParam);
     prefs.putString(KEY_ADMIN_USER, adminUser);
     prefs.putString(KEY_ADMIN_HASH, adminPassHash);
+    prefs.putString(KEY_SCAN_TERM,  scanTerminator);
     prefs.putBool  (KEY_SETUP_DONE, setupDone);
 
     prefs.end();
@@ -58,6 +60,7 @@ void ConfigManager::factoryReset() {
     urlParam      = DEFAULT_URL_PARAM;
     adminUser     = "";
     adminPassHash = "";
+    scanTerminator= "crlf";
     setupDone     = false;
 
     Serial.println("[Config] Factory reset done.");

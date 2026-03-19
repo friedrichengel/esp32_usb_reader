@@ -12,6 +12,7 @@
 #define KEY_ADMIN_USER   "admin_user"
 #define KEY_ADMIN_HASH   "admin_hash"
 #define KEY_SETUP_DONE   "setup_done"
+#define KEY_SCAN_TERM    "scan_term"
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 #define DEFAULT_URL_PARAM  "data"
@@ -25,6 +26,8 @@ public:
     String urlParam;
     String adminUser;
     String adminPassHash; // SHA-256 hex string
+    // Scan terminator: "crlf" = CR+LF (Enter×2), "cr" = Enter, "tab" = Tab, "none" = 300ms timeout
+    String scanTerminator;
     bool   setupDone;
 
     ConfigManager();

@@ -290,7 +290,7 @@ static esp_err_t handleLogout(PsychicRequest* req, PsychicResponse* res) {
 // ─── GET /settings ────────────────────────────────────────────────────────────
 static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
     logRequest(req);
-    if (!isAuthenticated(req)) return res->redirect("/login");
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
 
     bool saved  = req->hasParam("saved");
     String msg  = saved ? R"(<p class="msg ok">Einstellungen gespeichert.</p>)" : "";
@@ -311,6 +311,16 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
   <p class="info">Aufruf: <code>basis-url?{param}={qr-inhalt}</code></p>
   <label>Parameter-Name</label>
   <input type="text" name="url_param" value=")delim" + Config.urlParam + R"delim(">
+
+  <h2>Scanner</h2>
+  <label>Abschlusszeichen</label>
+  <select name="scan_term">
+    <option value="crlf")delim" + (Config.scanTerminator == "crlf" ? " selected" : "") + R"delim(>CR LF &ndash; Standard</option>
+    <option value="cr")delim"   + (Config.scanTerminator == "cr"   ? " selected" : "") + R"delim(>CR</option>
+    <option value="tab")delim"  + (Config.scanTerminator == "tab"  ? " selected" : "") + R"delim(>TAB</option>
+    <option value="none")delim" + (Config.scanTerminator == "none" ? " selected" : "") + R"delim(>Kein Abschlusszeichen (300&thinsp;ms Timeout)</option>
+  </select>
+  <p class="info" style="margin-top:8px">Welches Abschlusszeichen der Scanner nach dem Code sendet. Bei &bdquo;Kein Abschlusszeichen&ldquo; wird nach 300&thinsp;ms Stille ausgel&ouml;st.</p>
 
   <h2>Passwort &auml;ndern</h2>
   <label>Neues Passwort (leer = unver&auml;ndert, mind. 6 Zeichen)</label>
@@ -336,7 +346,7 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
 // ─── POST /settings ───────────────────────────────────────────────────────────
 static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
     logRequest(req);
-    if (!isAuthenticated(req)) return res->redirect("/login");
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
 
     String ssid    = param(req, "wifi_ssid");
     String wpass   = param(req, "wifi_pass");
@@ -355,10 +365,13 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
         Config.adminPassHash = ConfigManager::sha256(newPass);
     }
 
+    String term    = param(req, "scan_term");
+
     if (!ssid.isEmpty())  Config.wifiSSID  = ssid;
     if (!wpass.isEmpty()) Config.wifiPass  = wpass;
     Config.baseURL  = url;
     Config.urlParam = prm.isEmpty() ? "data" : prm;
+    if (term == "crlf" || term == "cr" || term == "tab" || term == "none") Config.scanTerminator = term;
     Config.save();
 
     return res->redirect("/settings?saved=1");
@@ -367,7 +380,7 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
 // ─── GET /update ──────────────────────────────────────────────────────────────
 static esp_err_t handleUpdateGet(PsychicRequest* req, PsychicResponse* res) {
     logRequest(req);
-    if (!isAuthenticated(req)) return res->redirect("/login");
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
 
     String partition = String(esp_ota_get_running_partition()->label);
     String body = navBar() + R"(<h1>Firmware-Update</h1>
@@ -663,7 +676,7 @@ static esp_err_t handleCert(PsychicRequest* req, PsychicResponse* res) {
 // ─── GET /monitor ─────────────────────────────────────────────────────────────
 static esp_err_t handleMonitor(PsychicRequest* req, PsychicResponse* res) {
     logRequest(req);
-    if (!isAuthenticated(req)) return res->redirect("/login");
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
 
     String body = navBar();
     body += R"mon(<style>

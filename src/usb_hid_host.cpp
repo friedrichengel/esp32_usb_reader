@@ -1,4 +1,5 @@
 #include "usb_hid_host.h"
+#include "config.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -89,19 +90,31 @@ void USBHIDHost::_processReport(const uint8_t* data, size_t /*len*/) {
         if (wasDown) continue;
 
         char c = _keycodeToAscii(kc, shifted);
-        if (c == '\n') {
-            // Complete scan received
-            String scanned = _scanBuffer;
-            _scanBuffer = "";
-            if (scanned.length() > 0 && _callback) {
-                _callback(scanned);
-            }
-        } else if (c == '\b') {
+
+        // Determine configured terminator character
+        // "crlf" and "cr" both fire on Enter ('\n'); for "crlf" the scanner sends
+        // Enter twice – the second arrives with an empty buffer and is ignored.
+        const String& term = Config.scanTerminator;
+        char termChar = (term == "tab") ? '\t' : '\n'; // unused when term == "none"
+
+        if (c == '\b') {
             if (_scanBuffer.length() > 0) {
                 _scanBuffer.remove(_scanBuffer.length() - 1);
             }
+        } else if (c == '\n' || c == '\t') {
+            // Control characters: fire callback if this matches the terminator
+            if (term != "none" && c == termChar) {
+                String scanned = _scanBuffer;
+                _scanBuffer    = "";
+                _lastCharTime  = 0;
+                if (scanned.length() > 0 && _callback) {
+                    _callback(scanned);
+                }
+            }
+            // otherwise ignore (e.g. Tab chars when mode is "lf")
         } else if (c != 0) {
-            _scanBuffer += c;
+            _scanBuffer   += c;
+            _lastCharTime  = millis();
         }
     }
 
@@ -246,6 +259,9 @@ void USBHIDHost::_onClientEvent(void* ev) {
                 }
             }
 
+            // Stop as soon as we have a complete HID interface + interrupt-IN endpoint
+            if (ifaceNum >= 0 && epAddr != 0) break;
+
             if (desc->bLength == 0) break;
             offset += desc->bLength;
         }
@@ -317,6 +333,18 @@ void USBHIDHost::begin(ScanCallback cb) {
                             &_hidTaskHandle, 0);
     xTaskCreatePinnedToCore(usb_lib_task,  "usb_lib", 4096, this, 5,
                             &_libTaskHandle, 0);
+}
+
+// ─── checkTimeout() ──────────────────────────────────────────────────────────
+void USBHIDHost::checkTimeout() {
+    if (Config.scanTerminator != "none") return;
+    if (_scanBuffer.isEmpty() || _lastCharTime == 0) return;
+    if (millis() - _lastCharTime >= 300) {
+        String scanned = _scanBuffer;
+        _scanBuffer   = "";
+        _lastCharTime = 0;
+        if (_callback) _callback(scanned);
+    }
 }
 
 // ─── stop() ──────────────────────────────────────────────────────────────────

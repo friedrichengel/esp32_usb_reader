@@ -52,8 +52,8 @@ static void connectWiFi() {
 
 // ─── QR scan callback ─────────────────────────────────────────────────────────
 static void onQRScanned(const String& data) {
-    Serial.printf("[QR] Scanned: %s\n", data.c_str());
-    AppLogger.add("QR", "Scan: %s", data.c_str());
+    Serial.printf("[Scan] %s\n", data.c_str());
+    AppLogger.add("Scan", "%s", data.c_str());
     HTTPCaller::call(Config.baseURL, Config.urlParam, data);
 }
 
@@ -75,6 +75,12 @@ void setup() {
     // 4. Start USB HID host (QR scanner)
     //    The USB OTG peripheral must be connected to a scanner via USB OTG
     //    adapter on the USB OTG port of the ESP32-S3 DevKitC-1.
+
+    // VBUS aktivieren für USB-Host
+    pinMode(GPIO_NUM_21, OUTPUT); // GPIO21 = VBUS enable auf DevKitC-1
+    digitalWrite(GPIO_NUM_21, HIGH);
+    delay(100);
+
     UsbHid.begin(onQRScanned);
 
     Serial.println("[Main] Setup complete.");
@@ -88,6 +94,9 @@ void setup() {
 void loop() {
     // Drive the HTTPS/HTTP server event loop
     WebSrv.loop();
+
+    // Fire scan callback when no terminator is configured (timeout mode)
+    UsbHid.checkTimeout();
 
     // Periodically check WiFi and reconnect if dropped
     static uint32_t lastCheck = 0;

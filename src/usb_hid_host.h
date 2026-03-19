@@ -27,6 +27,12 @@ public:
     /** Stop both tasks and uninstall the USB Host Library. */
     void stop();
 
+    /**
+     * Call from loop() to fire the callback when scanTerminator == "none"
+     * and no character has arrived for 300 ms.
+     */
+    void checkTimeout();
+
     bool isDeviceConnected() const { return _deviceConnected; }
 
     // ── Internal use – do not call directly ──
@@ -47,6 +53,7 @@ private:
 
     // Scan line buffer (filled character by character from HID reports)
     String   _scanBuffer;
+    uint32_t _lastCharTime = 0;          // millis() of last received character (for timeout mode)
     uint8_t  _prevKeys[6] = {};          // previous key state (for key-down detection)
 
     // Forward-declared opaque handles (ESP-IDF types)

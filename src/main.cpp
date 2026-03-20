@@ -13,8 +13,11 @@ static void connectWiFi() {
     if (Config.wifiSSID.isEmpty()) {
         Serial.println("[WiFi] No SSID configured – starting AP mode");
         WiFi.mode(WIFI_AP);
-        String apName = "QRReader-" + WiFi.macAddress().substring(9);
-        apName.replace(":", "");
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        char suffix[7];
+        snprintf(suffix, sizeof(suffix), "%02X%02X%02X", mac[3], mac[4], mac[5]);
+        String apName = "QRReader-" + String(suffix);
         WiFi.softAP(apName.c_str());
         Serial.printf("[WiFi] AP started: %s  IP: %s\n",
                       apName.c_str(),
@@ -23,6 +26,17 @@ static void connectWiFi() {
     }
 
     WiFi.mode(WIFI_STA);
+    if (!Config.dhcpEnabled && !Config.staticIP.isEmpty()) {
+        IPAddress ip, sn, gw, dns;
+        ip.fromString(Config.staticIP);
+        sn.fromString(Config.staticSubnet);
+        gw.fromString(Config.staticGateway);
+        dns.fromString(Config.staticDNS);
+        WiFi.config(ip, gw, sn, dns);
+        Serial.printf("[WiFi] Static IP: %s / %s GW: %s DNS: %s\n",
+                      Config.staticIP.c_str(), Config.staticSubnet.c_str(),
+                      Config.staticGateway.c_str(), Config.staticDNS.c_str());
+    }
     WiFi.begin(Config.wifiSSID.c_str(), Config.wifiPass.c_str());
     Serial.printf("[WiFi] Connecting to %s", Config.wifiSSID.c_str());
 
@@ -52,6 +66,25 @@ static void connectWiFi() {
 
 // ─── QR scan callback ─────────────────────────────────────────────────────────
 static void onQRScanned(const String& data) {
+    // Geheimer Reset-Code: zweimal hintereinander → Werksreset
+    // Prüfung VOR dem Logging damit der Code nie im Klartext erscheint
+    static int resetCount = 0;
+    if (data == RESET_QR_CODE) {
+        resetCount++;
+        Serial.printf("[Scan] Reset-Code erkannt (%d/2)\n", resetCount);
+        AppLogger.add("Scan", "Reset-Code erkannt (%d/2)", resetCount);
+        if (resetCount >= 2) {
+            Serial.println("[Scan] Werksreset via QR-Code!");
+            AppLogger.add("Scan", "Werksreset wird ausgefuehrt...");
+            delay(500);
+            Config.factoryReset();
+            ESP.restart();
+        }
+        return;
+    }
+
+    // Anderer Code → Zähler zurücksetzen + normal verarbeiten
+    resetCount = 0;
     Serial.printf("[Scan] %s\n", data.c_str());
     AppLogger.add("Scan", "%s", data.c_str());
     HTTPCaller::call(Config.baseURL, Config.urlParam, data);

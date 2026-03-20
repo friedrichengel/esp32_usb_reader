@@ -6,7 +6,8 @@ ConfigManager Config;
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
 ConfigManager::ConfigManager()
-    : urlParam(DEFAULT_URL_PARAM), scanTerminator("crlf"), setupDone(false) {}
+    : urlParam(DEFAULT_URL_PARAM), scanTerminator("crlf"), kbLayout("de"), setupDone(false),
+      dhcpEnabled(true), staticSubnet("255.255.255.0"), staticDNS("8.8.8.8") {}
 
 // ─── load() ──────────────────────────────────────────────────────────────────
 void ConfigManager::load() {
@@ -20,7 +21,13 @@ void ConfigManager::load() {
     adminUser     = prefs.getString(KEY_ADMIN_USER, "");
     adminPassHash = prefs.getString(KEY_ADMIN_HASH, "");
     scanTerminator= prefs.getString(KEY_SCAN_TERM,  "crlf");
+    kbLayout      = prefs.getString(KEY_KB_LAYOUT,  "de");
     setupDone     = prefs.getBool  (KEY_SETUP_DONE, false);
+    dhcpEnabled   = prefs.getBool  (KEY_DHCP_ENABLED, true);
+    staticIP      = prefs.getString(KEY_STATIC_IP,  "");
+    staticSubnet  = prefs.getString(KEY_STATIC_SN,  "255.255.255.0");
+    staticGateway = prefs.getString(KEY_STATIC_GW,  "");
+    staticDNS     = prefs.getString(KEY_STATIC_DNS, "8.8.8.8");
 
     prefs.end();
 
@@ -40,7 +47,13 @@ void ConfigManager::save() {
     prefs.putString(KEY_ADMIN_USER, adminUser);
     prefs.putString(KEY_ADMIN_HASH, adminPassHash);
     prefs.putString(KEY_SCAN_TERM,  scanTerminator);
+    prefs.putString(KEY_KB_LAYOUT,  kbLayout);
     prefs.putBool  (KEY_SETUP_DONE, setupDone);
+    prefs.putBool  (KEY_DHCP_ENABLED, dhcpEnabled);
+    prefs.putString(KEY_STATIC_IP,  staticIP);
+    prefs.putString(KEY_STATIC_SN,  staticSubnet);
+    prefs.putString(KEY_STATIC_GW,  staticGateway);
+    prefs.putString(KEY_STATIC_DNS, staticDNS);
 
     prefs.end();
     Serial.println("[Config] Saved.");
@@ -61,7 +74,13 @@ void ConfigManager::factoryReset() {
     adminUser     = "";
     adminPassHash = "";
     scanTerminator= "crlf";
+    kbLayout      = "de";
     setupDone     = false;
+    dhcpEnabled   = true;
+    staticIP      = "";
+    staticSubnet  = "255.255.255.0";
+    staticGateway = "";
+    staticDNS     = "8.8.8.8";
 
     Serial.println("[Config] Factory reset done.");
 }

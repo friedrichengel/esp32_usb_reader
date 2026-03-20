@@ -13,9 +13,19 @@
 #define KEY_ADMIN_HASH   "admin_hash"
 #define KEY_SETUP_DONE   "setup_done"
 #define KEY_SCAN_TERM    "scan_term"
+#define KEY_KB_LAYOUT    "kb_layout"
+#define KEY_DHCP_ENABLED "dhcp_en"
+#define KEY_STATIC_IP    "static_ip"
+#define KEY_STATIC_SN    "static_sn"
+#define KEY_STATIC_GW    "static_gw"
+#define KEY_STATIC_DNS   "static_dns"
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 #define DEFAULT_URL_PARAM  "data"
+
+// ─── Geheimer Reset-QR-Code ───────────────────────────────────────────────────
+// Zweimal hintereinander scannen (ohne anderen Code dazwischen) → Werksreset.
+#define RESET_QR_CODE "QRR-7X9K2M5P8Q3N4W6Y1Z0A8B3C7D2E5F4G6H9J0K8L3M7N2P5Q4R1S6T9U0V8W3X7Y4Z2"
 
 // ─── ConfigManager ───────────────────────────────────────────────────────────
 class ConfigManager {
@@ -28,7 +38,16 @@ public:
     String adminPassHash; // SHA-256 hex string
     // Scan terminator: "crlf" = CR+LF (Enter×2), "cr" = Enter, "tab" = Tab, "none" = 300ms timeout
     String scanTerminator;
+    // Keyboard layout: "de" = QWERTZ (default), "us" = QWERTY
+    String kbLayout;
     bool   setupDone;
+
+    // Network / IP
+    bool   dhcpEnabled;   // true = DHCP (default), false = static IP
+    String staticIP;
+    String staticSubnet;
+    String staticGateway;
+    String staticDNS;
 
     ConfigManager();
 

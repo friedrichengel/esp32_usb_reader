@@ -305,6 +305,27 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
   <label>Passwort</label>
   <input type="password" name="wifi_pass" placeholder="(leer = unver&auml;ndert)">
 
+  <h2>Netzwerk</h2>
+  <label>IP-Konfiguration</label>
+  <select name="dhcp_mode" onchange="dhcpToggle(this.value)">
+    <option value="dhcp")delim"   + (Config.dhcpEnabled  ? " selected" : "") + R"delim(>DHCP &ndash; automatisch</option>
+    <option value="static")delim" + (!Config.dhcpEnabled ? " selected" : "") + R"delim(>Statische IP</option>
+  </select>
+  <div id="dhcp-info" style=")delim" + String(Config.dhcpEnabled ? "" : "display:none") + R"delim(">
+    <p class="info" style="margin-top:8px">Aktuelle IP (DHCP): <strong>)delim" + getMyIP() + R"delim(</strong></p>
+  </div>
+  <div id="static-fields" style=")delim" + String(!Config.dhcpEnabled ? "" : "display:none") + R"delim(">
+    <label>IP-Adresse</label>
+    <input type="text" name="static_ip" value=")delim" + Config.staticIP + R"delim(" placeholder="192.168.1.100">
+    <label>Subnetzmaske</label>
+    <input type="text" name="static_subnet" value=")delim" + Config.staticSubnet + R"delim(" placeholder="255.255.255.0">
+    <label>Gateway</label>
+    <input type="text" name="static_gw" value=")delim" + Config.staticGateway + R"delim(" placeholder="192.168.1.1">
+    <label>DNS</label>
+    <input type="text" name="static_dns" value=")delim" + Config.staticDNS + R"delim(" placeholder="8.8.8.8">
+  </div>
+  <p class="info" style="margin-top:8px">&#9432; &Auml;nderungen der IP-Einstellungen werden erst nach einem Neustart des Ger&auml;ts wirksam.</p>
+
   <h2>QR-Code URL</h2>
   <label>Basis-URL</label>
   <input type="url" name="base_url" value=")delim" + Config.baseURL + R"delim(" placeholder="https://example.com/api">
@@ -313,6 +334,11 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
   <input type="text" name="url_param" value=")delim" + Config.urlParam + R"delim(">
 
   <h2>Scanner</h2>
+  <label>Tastaturlayout</label>
+  <select name="kb_layout">
+    <option value="de")delim" + (Config.kbLayout == "de" ? " selected" : "") + R"delim(>Deutsch &ndash; QWERTZ (Standard)</option>
+    <option value="us")delim" + (Config.kbLayout == "us" ? " selected" : "") + R"delim(>Englisch &ndash; QWERTY (US)</option>
+  </select>
   <label>Abschlusszeichen</label>
   <select name="scan_term">
     <option value="crlf")delim" + (Config.scanTerminator == "crlf" ? " selected" : "") + R"delim(>CR LF &ndash; Standard</option>
@@ -330,9 +356,18 @@ static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
 
   <button type="submit" class="btn">Speichern</button>
 </form>
-<p style="margin-top:16px;font-size:.82rem;color:#999">
-  Reset: <a href="/reset">/reset</a>
-</p>)delim"
+<script>
+function dhcpToggle(v){
+  document.getElementById('dhcp-info').style.display    = v==='dhcp'    ? '' : 'none';
+  document.getElementById('static-fields').style.display= v==='static'  ? '' : 'none';
+}
+</script>
+<div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <form method="POST" action="/reboot" style="margin:0">
+    <button type="submit" class="btn btn-secondary">&#8635; Neustart</button>
+  </form>
+  <span style="font-size:.82rem;color:#999">Werksreset: <a href="/reset">/reset</a></span>
+</div>)delim"
     + String(F("<div class=\"msg warn\" style=\"margin-top:16px\">"
                "Das Zertifikat ist selbst-signiert. Um die Browser-Warnung dauerhaft "
                "zu vermeiden, Zertifikat herunterladen und im System installieren:<br>"
@@ -365,13 +400,29 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
         Config.adminPassHash = ConfigManager::sha256(newPass);
     }
 
-    String term    = param(req, "scan_term");
+    String term       = param(req, "scan_term");
+    String kbLayout   = param(req, "kb_layout");
+    String dhcpMode   = param(req, "dhcp_mode");
+    String staticIp   = param(req, "static_ip");
+    String staticSn   = param(req, "static_subnet");
+    String staticGw   = param(req, "static_gw");
+    String staticDns  = param(req, "static_dns");
 
     if (!ssid.isEmpty())  Config.wifiSSID  = ssid;
     if (!wpass.isEmpty()) Config.wifiPass  = wpass;
     Config.baseURL  = url;
     Config.urlParam = prm.isEmpty() ? "data" : prm;
     if (term == "crlf" || term == "cr" || term == "tab" || term == "none") Config.scanTerminator = term;
+    if (kbLayout == "de" || kbLayout == "us") Config.kbLayout = kbLayout;
+
+    Config.dhcpEnabled = (dhcpMode != "static");
+    if (!Config.dhcpEnabled) {
+        if (!staticIp.isEmpty())  Config.staticIP      = staticIp;
+        if (!staticSn.isEmpty())  Config.staticSubnet  = staticSn;
+        if (!staticGw.isEmpty())  Config.staticGateway = staticGw;
+        if (!staticDns.isEmpty()) Config.staticDNS     = staticDns;
+    }
+
     Config.save();
 
     return res->redirect("/settings?saved=1");
@@ -457,6 +508,20 @@ static esp_err_t handleResetFactory(PsychicRequest* req, PsychicResponse* res) {
 <p class="msg ok">Alle Einstellungen wurden gel&ouml;scht. Das Ger&auml;t startet in 3 Sekunden neu...</p>
 <script>setTimeout(()=>{window.location='/setup'},3000)</script>)").c_str());
 
+    delay(3000);
+    ESP.restart();
+    return err;
+}
+
+// ─── POST /reboot ─────────────────────────────────────────────────────────────
+static esp_err_t handleReboot(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
+    AppLogger.add("WEB", "Neustart angefordert");
+    esp_err_t err = res->send(200, "text/html",
+        page("Neustart", R"(<h1>Neustart</h1>
+<p class="msg ok">Das Ger&auml;t startet in 3 Sekunden neu&hellip;</p>
+<script>setTimeout(()=>{window.location='/'},3000)</script>)").c_str());
     delay(3000);
     ESP.restart();
     return err;
@@ -770,6 +835,7 @@ static void registerRoutes(PsychicHttpServer* srv) {
         return res->send(204, "image/x-icon", "");
     });
     srv->on("/reset",    HTTP_GET,  handleResetGet);
+    srv->on("/reboot",   HTTP_POST, handleReboot);
     srv->on("/reset/factory", HTTP_POST, handleResetFactory);
     srv->on("/cert",         HTTP_GET,  handleCert);
     srv->on("/monitor",      HTTP_GET,  handleMonitor);

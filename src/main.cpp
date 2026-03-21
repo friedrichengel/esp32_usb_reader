@@ -64,8 +64,63 @@ static void connectWiFi() {
     }
 }
 
+// ─── WiFi-QR-Code Parser ──────────────────────────────────────────────────────
+// Format: WIFI:T:WPA;S:SSID;P:Passwort;H:false;;
+// Felder können in beliebiger Reihenfolge auftreten.
+// Rückgabe: true wenn ein SSID gefunden wurde
+static bool parseWifiQR(const String& data, String& ssid, String& pass) {
+    if (!data.startsWith("WIFI:") && !data.startsWith("wifi:")) return false;
+    ssid = "";
+    pass = "";
+
+    String s = data.substring(5); // "WIFI:" überspringen
+    int i = 0;
+    while (i < (int)s.length()) {
+        int colon = s.indexOf(':', i);
+        if (colon < 0) break;
+        String key = s.substring(i, colon);
+
+        // Wert bis zum nächsten nicht-escapeten Semikolon lesen
+        String val = "";
+        int j = colon + 1;
+        while (j < (int)s.length()) {
+            char c = s[j];
+            if (c == '\\' && j + 1 < (int)s.length()) {
+                val += s[j + 1];
+                j += 2;
+            } else if (c == ';') {
+                j++;
+                break;
+            } else {
+                val += c;
+                j++;
+            }
+        }
+        i = j;
+
+        if      (key == "S" || key == "s") ssid = val;
+        else if (key == "P" || key == "p") pass = val;
+    }
+    return !ssid.isEmpty();
+}
+
 // ─── QR scan callback ─────────────────────────────────────────────────────────
 static void onQRScanned(const String& data) {
+    // WiFi-QR-Code im AP-Modus → Zugangsdaten übernehmen und neu verbinden
+    if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA) {
+        String ssid, pass;
+        if (parseWifiQR(data, ssid, pass)) {
+            Serial.printf("[Scan] WiFi-QR erkannt – verbinde mit SSID: %s\n", ssid.c_str());
+            AppLogger.add("Scan", "WiFi-QR: verbinde mit '%s'", ssid.c_str());
+            Config.wifiSSID = ssid;
+            Config.wifiPass = pass;
+            Config.save();
+            delay(300);
+            ESP.restart(); // Neustart damit Cert, Web-Server und WiFi sauber neu starten
+            return;
+        }
+    }
+
     // Geheimer Reset-Code: zweimal hintereinander → Werksreset
     // Prüfung VOR dem Logging damit der Code nie im Klartext erscheint
     static int resetCount = 0;
@@ -135,7 +190,11 @@ void loop() {
     static uint32_t lastCheck = 0;
     if (millis() - lastCheck > 30000) {
         lastCheck = millis();
-        if (!Config.wifiSSID.isEmpty() && WiFi.status() != WL_CONNECTED) {
+        // Nur reconnecten wenn wir im STA-Modus sind und die Verbindung verloren haben.
+        // Im AP-Modus (z.B. Fallback wegen falscher Credentials) nicht stören.
+        if (!Config.wifiSSID.isEmpty() &&
+            WiFi.getMode() == WIFI_MODE_STA &&
+            WiFi.status() != WL_CONNECTED) {
             Serial.println("[WiFi] Lost connection – reconnecting...");
             connectWiFi();
         }

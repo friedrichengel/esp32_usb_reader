@@ -17,6 +17,8 @@ Ein PlatformIO/Arduino-Projekt für den **ESP32-S3 DevKitC-1**, das einen per US
 - **Firmware-Version** (`/version`) – liefert die aktuelle Version als JSON; Version ist in `src/version.h` definiert
 - **mDNS** – erreichbar als `https://qrreader.local`
 - **Fallback-AP** – ist kein WLAN konfiguriert oder die Verbindung schlägt fehl, öffnet der ESP32-S3 einen eigenen Access Point
+- **WLAN per QR-Code einrichten** – im AP-Modus kann ein WLAN-QR-Code (Format `WIFI:T:WPA;S:...;P:...;;`) eingescannt werden, um die Zugangsdaten automatisch zu übernehmen
+- **Werksreset per QR-Code** – ein geheimer QR-Code löst nach zweimaligem Scannen hintereinander einen Werksreset aus
 
 ---
 
@@ -54,13 +56,23 @@ Ein PlatformIO/Arduino-Projekt für den **ESP32-S3 DevKitC-1**, das einen per US
 pio run -t upload
 ```
 
-### 2. SSL-Zertifikat wird generiert
+### 2. WLAN per QR-Code einrichten (optional)
+
+Ist noch kein WLAN konfiguriert, startet der ESP32-S3 im AP-Modus (`QRReader-XXYYZZ`). Statt die Zugangsdaten manuell im Web-Interface einzutragen, kann ein **WLAN-QR-Code** eingescannt werden:
+
+1. WLAN-QR-Code für das Zielnetzwerk erzeugen (die meisten Router-Apps, Windows 11 und Android bieten das direkt an)
+2. QR-Code vor den angeschlossenen Scanner halten
+3. Der ESP32-S3 erkennt das `WIFI:T:WPA;S:...;P:...;;`-Format automatisch, speichert die Zugangsdaten und startet neu
+
+> Der Scan funktioniert ausschließlich wenn der ESP32-S3 sich im AP-Modus befindet (kein WLAN verbunden). Im normalen Betrieb werden WLAN-QR-Codes wie jeder andere Code an die konfigurierte URL weitergeleitet.
+
+### 3. SSL-Zertifikat wird generiert
 
 Beim allerersten Start generiert der ESP32-S3 automatisch ein selbst-signiertes RSA-2048-Zertifikat. **Dieser Vorgang kann bis zu 2 Minuten dauern.** Der Fortschritt ist im seriellen Monitor sichtbar. Das Zertifikat wird in NVS gespeichert und bei jedem weiteren Start sofort geladen.
 
 Da es sich um ein selbst-signiertes Zertifikat handelt, zeigt der Browser eine Sicherheitswarnung. Diese muss einmalig bestätigt werden ("Trotzdem fortfahren" o. Ä.).
 
-### 3. Ersten Benutzer anlegen
+### 4. Ersten Benutzer anlegen
 
 Nach der Zertifikatsgenerierung den Browser öffnen:
 
@@ -75,7 +87,7 @@ Auf der Setup-Seite wird die **MAC-Adresse des Gerätes** angezeigt.
 
 Benutzername und Passwort vergeben – das Passwort wird nur als SHA-256-Hash gespeichert.
 
-### 4. Einstellungen konfigurieren
+### 5. Einstellungen konfigurieren
 
 Nach dem Login unter `/settings`:
 
@@ -121,9 +133,9 @@ Die Monitor-Seite zeigt alle Ereignisse in Echtzeit an (Polling alle 2 Sekunden,
 
 | Kategorie | Inhalt |
 |---|---|
-| `QR` | Gescannter QR-Code-Inhalt |
+| `Scan` | Gescannter QR-Code-Inhalt |
 | `HTTP` | URL + HTTP-Statuscode bei jedem Trigger-Aufruf |
-| `WIFI` | WLAN-Ereignisse |
+| `WEB` | Aufgerufene Web-Routen |
 | `SYS` | Systemereignisse |
 | `ERR` | Fehler |
 
@@ -131,7 +143,9 @@ Der Ringpuffer speichert die letzten **100 Einträge** im RAM (kein Verlust nach
 
 ---
 
-## Werksreset (`/reset`)
+## Werksreset
+
+### Über das Web-Interface (`/reset`)
 
 Die Reset-Seite (`https://<IP>/reset`) ist ohne Login erreichbar, erfordert aber eine Authentifizierung mit der **MAC-Adresse des Geräts**:
 
@@ -143,6 +157,18 @@ Die MAC-Adresse wird sowohl auf der Reset-Seite als auch auf der Setup-Seite ang
 Nach dem Reset werden alle gespeicherten Einstellungen und Zugangsdaten gelöscht und der ESP32-S3 startet neu. Beim nächsten Aufruf erscheint wieder die Ersteinrichtungs-Seite (`/setup`).
 
 Ist man bereits eingeloggt, genügt ein Klick auf den Reset-Button ohne erneute Passwortabfrage.
+
+### Über QR-Code
+
+Der Werksreset kann auch ohne Web-Interface ausgelöst werden – nützlich wenn kein Netzwerkzugang möglich ist:
+
+1. Den geheimen Reset-QR-Code **zweimal hintereinander** scannen
+2. Wird ein anderer QR-Code dazwischen eingescannt, wird der Zähler zurückgesetzt (Schutz vor versehentlichem Auslösen)
+3. Nach dem zweiten Scan löscht das Gerät alle Einstellungen und startet neu
+
+Der Reset-Code ist in `src/config.h` unter `RESET_QR_CODE` definiert. Der Code erscheint **niemals im Klartext im Log** – lediglich `Reset-Code erkannt (1/2)` bzw. `(2/2)` wird ausgegeben. Den QR-Code aus dem definierten String erzeugen, z. B. mit einem Online-QR-Generator oder einer Smartphone-App.
+
+> **Hinweis:** Den Reset-QR-Code sicher aufbewahren – wer ihn kennt, kann das Gerät ohne Login zurücksetzen.
 
 ### Was wird beim Reset gelöscht / behalten?
 

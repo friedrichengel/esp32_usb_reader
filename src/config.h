@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+// ─── Debug-Flags ─────────────────────────────────────────────────────────────
+// Auskommentieren um die jeweiligen Debug-Ausgaben zu deaktivieren
+//#define USB_DEBUG   // USB HID: Transfer-Berichte, Keycodes, Scan-Puffer
+
 // ─── Configuration keys (NVS namespace "qrreader") ──────────────────────────
 #define NVS_NAMESPACE    "qrreader"
 #define KEY_WIFI_SSID    "wifi_ssid"

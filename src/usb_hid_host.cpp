@@ -86,9 +86,22 @@ static void transfer_cb(usb_transfer_t* transfer) {
 void USBHIDHost::_onTransferDone(void* t) {
     auto* transfer = static_cast<usb_transfer_t*>(t);
 
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED &&
-        transfer->actual_num_bytes >= (int)sizeof(HidKeyboardReport)) {
-        _processReport(transfer->data_buffer, transfer->actual_num_bytes);
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+#ifdef USB_DEBUG
+        Serial.printf("[USB] Transfer OK: %d Bytes  (erwartet >=%d)\n",
+                      transfer->actual_num_bytes, (int)sizeof(HidKeyboardReport));
+#endif
+        if (transfer->actual_num_bytes >= (int)sizeof(HidKeyboardReport)) {
+            _processReport(transfer->data_buffer, transfer->actual_num_bytes);
+        } else {
+#ifdef USB_DEBUG
+            Serial.printf("[USB] Report zu kurz – ignoriert\n");
+#endif
+        }
+    } else {
+#ifdef USB_DEBUG
+        Serial.printf("[USB] Transfer Status: %d\n", transfer->status);
+#endif
     }
 
     // Resubmit for next report (only if still connected)
@@ -114,6 +127,10 @@ void USBHIDHost::_processReport(const uint8_t* data, size_t /*len*/) {
         if (wasDown) continue;
 
         char c = _keycodeToAscii(kc, shifted);
+#ifdef USB_DEBUG
+        Serial.printf("[USB] Key: 0x%02X  shift=%d  char=0x%02X '%c'\n",
+                      kc, shifted, (uint8_t)c, c >= 0x20 ? c : '?');
+#endif
 
         // Determine configured terminator character
         // "crlf" and "cr" both fire on Enter ('\n'); for "crlf" the scanner sends
@@ -122,6 +139,9 @@ void USBHIDHost::_processReport(const uint8_t* data, size_t /*len*/) {
         char termChar = (term == "tab") ? '\t' : '\n'; // unused when term == "none"
 
         if (c == '\b') {
+#ifdef USB_DEBUG
+            Serial.println("[USB] Backspace");
+#endif
             if (_scanBuffer.length() > 0) {
                 _scanBuffer.remove(_scanBuffer.length() - 1);
             }
@@ -131,6 +151,10 @@ void USBHIDHost::_processReport(const uint8_t* data, size_t /*len*/) {
                 String scanned = _scanBuffer;
                 _scanBuffer    = "";
                 _lastCharTime  = 0;
+#ifdef USB_DEBUG
+                Serial.printf("[USB] Scan komplett: '%s' (len=%d, callback=%s)\n",
+                              scanned.c_str(), scanned.length(), _callback ? "OK" : "NULL");
+#endif
                 if (scanned.length() > 0 && _callback) {
                     _callback(scanned);
                 }

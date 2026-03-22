@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "d:\\github\\esp32_usb_reader"
+    ]
+  }
+}

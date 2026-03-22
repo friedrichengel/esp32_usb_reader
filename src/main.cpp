@@ -64,6 +64,9 @@ static void connectWiFi() {
     }
 }
 
+// Flag: loop() führt den Neustart sauber aus statt aus Task-Kontext heraus
+static volatile bool g_restartPending = false;
+
 // ─── WiFi-QR-Code Parser ──────────────────────────────────────────────────────
 // Format: WIFI:T:WPA;S:SSID;P:Passwort;H:false;;
 // Felder können in beliebiger Reihenfolge auftreten.
@@ -106,17 +109,21 @@ static bool parseWifiQR(const String& data, String& ssid, String& pass) {
 
 // ─── QR scan callback ─────────────────────────────────────────────────────────
 static void onQRScanned(const String& data) {
+    Serial.printf("[Scan] Callback: '%s'  WiFiMode=%d\n", data.c_str(), (int)WiFi.getMode());
     // WiFi-QR-Code im AP-Modus → Zugangsdaten übernehmen und neu verbinden
     if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA) {
         String ssid, pass;
         if (parseWifiQR(data, ssid, pass)) {
-            Serial.printf("[Scan] WiFi-QR erkannt – verbinde mit SSID: %s\n", ssid.c_str());
-            AppLogger.add("Scan", "WiFi-QR: verbinde mit '%s'", ssid.c_str());
+            Serial.println("[Scan] ══════════════════════════════════");
+            Serial.printf ("[Scan] WiFi-QR erkannt!\n");
+            Serial.printf ("[Scan] SSID: %s\n", ssid.c_str());
+            Serial.printf ("[Scan] Zugangsdaten gespeichert – Neustart in 2 Sekunden...\n");
+            Serial.println("[Scan] ══════════════════════════════════");
+            AppLogger.add("Scan", "WiFi-QR: SSID='%s' gespeichert, Neustart folgt", ssid.c_str());
             Config.wifiSSID = ssid;
             Config.wifiPass = pass;
             Config.save();
-            delay(300);
-            ESP.restart(); // Neustart damit Cert, Web-Server und WiFi sauber neu starten
+            g_restartPending = true; // loop() führt den Neustart aus
             return;
         }
     }
@@ -129,11 +136,13 @@ static void onQRScanned(const String& data) {
         Serial.printf("[Scan] Reset-Code erkannt (%d/2)\n", resetCount);
         AppLogger.add("Scan", "Reset-Code erkannt (%d/2)", resetCount);
         if (resetCount >= 2) {
+            Serial.println("[Scan] ══════════════════════════════════");
             Serial.println("[Scan] Werksreset via QR-Code!");
+            Serial.println("[Scan] Neustart in 2 Sekunden...");
+            Serial.println("[Scan] ══════════════════════════════════");
             AppLogger.add("Scan", "Werksreset wird ausgefuehrt...");
-            delay(500);
             Config.factoryReset();
-            ESP.restart();
+            g_restartPending = true;
         }
         return;
     }
@@ -180,6 +189,12 @@ void setup() {
 
 // ─── loop() ──────────────────────────────────────────────────────────────────
 void loop() {
+    // Neustart-Flag (gesetzt aus USB-Task-Kontext, hier sauber ausgeführt)
+    if (g_restartPending) {
+        delay(2000); // Serielle Ausgabe noch raussenden, dann neu starten
+        ESP.restart();
+    }
+
     // Drive the HTTPS/HTTP server event loop
     WebSrv.loop();
 

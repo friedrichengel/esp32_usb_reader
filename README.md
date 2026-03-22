@@ -217,6 +217,79 @@ Nach dem Login unter `/settings` die WLAN-Zugangsdaten (SSID + Passwort) eintrag
 
 ---
 
+## Debug
+
+### USB_DEBUG Flag
+
+In `src/config.h` kann die ausführliche USB-HID-Diagnoseausgabe aktiviert werden:
+
+```c
+#define USB_DEBUG   // Kommentar-// entfernen = aktiv
+```
+
+Wenn aktiv, gibt der serielle Monitor für jeden USB-Transfer aus:
+- Byte-Anzahl des empfangenen Reports
+- Jeden erkannten Keycode mit Shift-Status und decodiertem Zeichen
+- Den zusammengebauten Scan-String kurz vor dem Callback-Aufruf
+
+Nach der Diagnose wieder auskommentieren, da die Ausgabe sehr umfangreich ist.
+
+### HTTP Debug Logger
+
+Startet einen einfachen HTTP-Server und gibt alle eingehenden Requests mit Zeitstempel, Absender-IP, Headern und GET-/POST-Parametern auf der Konsole aus. Nützlich um zu prüfen ob der ESP32-S3 bei einem Scan tatsächlich einen HTTP-Request absetzt und welche Daten übertragen werden.
+
+In den ESP32-Einstellungen (`/settings`) die Basis-URL auf den PC zeigen:
+
+```
+http://192.168.1.10/api
+http://192.168.1.10:8080/api   ← bei abweichendem Port
+```
+
+#### Python (`debug_tools/python/http_logger.py`)
+
+**Voraussetzungen:** Python 3 (keine zusätzlichen Pakete nötig)
+
+```bash
+# Port 80 (benötigt Root/Admin):
+sudo python3 debug_tools/python/http_logger.py
+
+# Ohne Root – alternativer Port:
+python3 debug_tools/python/http_logger.py 8080
+
+# Windows:
+python debug_tools\python\http_logger.py 8080
+```
+
+#### Perl (`debug_tools/perl/http_logger.pl`)
+
+**Voraussetzungen:** Perl installiert (Windows: [Strawberry Perl](https://strawberryperl.com/))
+
+```bash
+# Port 80 (benötigt Root/Admin):
+sudo perl debug_tools/perl/http_logger.pl
+
+# Ohne Root – alternativer Port:
+perl debug_tools/perl/http_logger.pl 8080
+```
+
+#### Beispielausgabe (beide Tools identisch)
+
+```
+────────────────────────────────────────────────────────────
+[2024-03-22 14:23:05]  192.168.1.42:51234
+────────────────────────────────────────────────────────────
+  GET /api?data=ABC123 HTTP/1.1
+
+  GET-Parameter:
+    data                 = ABC123
+
+  Header:
+    Host: 192.168.1.10
+    Connection: close
+```
+
+---
+
 ## Projektstruktur
 
 ```

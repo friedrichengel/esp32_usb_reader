@@ -288,13 +288,10 @@ static esp_err_t handleLogout(PsychicRequest* req, PsychicResponse* res) {
 }
 
 // ─── GET /settings ────────────────────────────────────────────────────────────
-static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
-    logRequest(req);
-    if (!isAuthenticated(req)) return handleLoginGet(req, res);
-
-    bool saved  = req->hasParam("saved");
-    String msg  = saved ? R"(<p class="msg ok">Einstellungen gespeichert.</p>)" : "";
-
+// ─── Settings page helper ─────────────────────────────────────────────────────
+// msg: optional Banner (leerer String = kein Banner), code: HTTP-Statuscode
+static esp_err_t sendSettingsPage(PsychicRequest* req, PsychicResponse* res,
+                                  const String& msg = "", int code = 200) {
     // Use "delim" raw string delimiter to avoid early termination by )"
     // inside placeholder="(leer = unveraendert)"
     String body = navBar() + "<h1>Einstellungen</h1>" + msg + R"delim(
@@ -375,7 +372,13 @@ function dhcpToggle(v){
                "&#11015; Zertifikat herunterladen (qrreader.pem)"
                "</a></div>"));
 
-    return res->send(200, "text/html", page("Einstellungen", body).c_str());
+    return res->send(code, "text/html", page("Einstellungen", body).c_str());
+}
+
+static esp_err_t handleSettingsGet(PsychicRequest* req, PsychicResponse* res) {
+    logRequest(req);
+    if (!isAuthenticated(req)) return handleLoginGet(req, res);
+    return sendSettingsPage(req, res);
 }
 
 // ─── POST /settings ───────────────────────────────────────────────────────────
@@ -392,10 +395,9 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
 
     if (!newPass.isEmpty()) {
         if (newPass.length() < 6 || newPass != newPass2) {
-            return res->send(400, "text/html",
-                page("Fehler", navBar() + R"(<h1>Fehler</h1>
-<p class="msg err">Passwort zu kurz oder stimmt nicht &uuml;berein.</p>
-<a href="/settings" class="btn btn-secondary">Zur&uuml;ck</a>)").c_str());
+            return sendSettingsPage(req, res,
+                R"(<p class="msg err">Passwort zu kurz oder Passw&ouml;rter stimmen nicht &uuml;berein.</p>)",
+                400);
         }
         Config.adminPassHash = ConfigManager::sha256(newPass);
     }
@@ -425,7 +427,8 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
 
     Config.save();
 
-    return res->redirect("/settings?saved=1");
+    return sendSettingsPage(req, res,
+        R"(<p class="msg ok">&#10003; Einstellungen gespeichert.</p>)");
 }
 
 // ─── GET /update ──────────────────────────────────────────────────────────────

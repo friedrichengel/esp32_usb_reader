@@ -104,9 +104,14 @@ void USBHIDHost::_onTransferDone(void* t) {
 #endif
     }
 
-    // Resubmit for next report (only if still connected)
+    // Resubmit for next report (only if still connected).
+    // ESP_ERR_INVALID_STATE is expected during disconnect (race between
+    // transfer callback and DEV_GONE event) – suppress it silently.
     if (_deviceConnected && _running) {
-        usb_host_transfer_submit(transfer);
+        esp_err_t err = usb_host_transfer_submit(transfer);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Transfer resubmit failed: %s", esp_err_to_name(err));
+        }
     }
 }
 

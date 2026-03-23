@@ -7,7 +7,7 @@ Ein PlatformIO/Arduino-Projekt für den **ESP32-S3 DevKitC-1**, das einen per US
 ## Features
 
 - **USB HID Host** – liest QR-Code-Scanner, die sich als USB-HID-Tastatur anmelden (Standard bei nahezu allen kommerziellen Scannern)
-- **HTTP-Callback** – bei jedem Scan wird `BASE_URL?PARAM=<QR-Inhalt>` per GET aufgerufen
+- **HTTP-Callback** – bei jedem Scan wird eine konfigurierbare URL per GET aufgerufen (Query-Parameter- oder Pfad-Modus, siehe unten)
 - **HTTPS Web-Interface** (Port 443) – Einstellungen, OTA-Firmware-Update, Login, Reset
 - **Selbst-signiertes TLS-Zertifikat** – wird beim ersten Start automatisch generiert (RSA-2048, 40 Jahre Gültigkeit) und dauerhaft in NVS gespeichert; HTTP Port 80 leitet auf HTTPS um
 - **Erster Start** – Benutzer wird beim ersten Aufruf angelegt; Passwort wird nur als SHA-256-Hash gespeichert
@@ -94,10 +94,27 @@ Nach dem Login unter `/settings`:
 | Feld | Beschreibung |
 |---|---|
 | WLAN SSID / Passwort | Zugangsdaten für das Heimnetz |
-| Basis-URL | Vollständige URL inkl. Schema, z. B. `https://example.com/api` |
-| Parameter-Name | Name des Query-Parameters, Standard: `data` |
+| Basis-URL | Vollständige URL inkl. Schema (siehe Modi unten) |
+| Parameter-Name | Name des Query-Parameters im Query-Modus, Standard: `data` |
 
-Beispiel-Aufruf nach einem Scan: `https://example.com/api?data=ABC123`
+#### URL-Modi
+
+**Query-Modus** – kein Platzhalter in der Basis-URL, der QR-Inhalt wird als Query-Parameter angehängt:
+
+```
+Basis-URL:  https://example.com/api
+Parameter:  data
+→ Aufruf:   https://example.com/api?data=ABC123
+```
+
+**Pfad-Modus** – die Basis-URL enthält den festen Platzhalter `{data}`, der durch den URL-kodierten QR-Inhalt ersetzt wird:
+
+```
+Basis-URL:  http://10.42.2.196:5173/persons/finish/{data}
+→ Aufruf:   http://10.42.2.196:5173/persons/finish/ABC123
+```
+
+Im Pfad-Modus wird das Feld „Parameter-Name" ignoriert.
 
 ---
 

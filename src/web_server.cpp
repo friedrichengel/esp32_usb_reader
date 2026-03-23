@@ -326,8 +326,8 @@ static esp_err_t sendSettingsPage(PsychicRequest* req, PsychicResponse* res,
   <h2>QR-Code URL</h2>
   <label>Basis-URL</label>
   <input type="url" name="base_url" value=")delim" + Config.baseURL + R"delim(" placeholder="https://example.com/api">
-  <p class="info">Aufruf: <code>basis-url?{param}={qr-inhalt}</code></p>
-  <label>Parameter-Name</label>
+  <p class="info">Query-Modus: <code>basis-url?{param}={qr-inhalt}</code> (Parameter-Name erforderlich)<br>Pfad-Modus: Platzhalter <code>{data}</code> direkt in der URL verwenden, z.B. <code>http://host/api/{data}/finish</code></p>
+  <label>Parameter-Name (nur Query-Modus)</label>
   <input type="text" name="url_param" value=")delim" + Config.urlParam + R"delim(">
 
   <h2>Scanner</h2>
@@ -922,8 +922,9 @@ void WebServerManager::begin() {
         // The inherited `config` member is NOT used for HTTPS – setting it has no effect.
         httpsServer->ssl_config.httpd.max_uri_handlers = 24;
         // Default is 2 – far too low (Chrome opens 4–6 parallel TLS connections).
-        // Each TLS context needs ~80 KB heap; 4 is a safe limit for ESP32-S3.
-        httpsServer->ssl_config.httpd.max_open_sockets = 4;
+        // /monitor polling adds 1-2 persistent connections on top of browser tabs.
+        // Each TLS context needs ~80 KB heap; 7 is a safe limit for ESP32-S3 with 8 MB PSRAM.
+        httpsServer->ssl_config.httpd.max_open_sockets = 7;
         // Evict the least-recently-used socket when all slots are full so new
         // connections are handled instead of hard-rejected.
         httpsServer->ssl_config.httpd.lru_purge_enable = true;

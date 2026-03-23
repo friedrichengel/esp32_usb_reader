@@ -19,12 +19,18 @@ int HTTPCaller::call(const String& baseURL,
         return -1;
     }
 
-    // Build URL:  baseURL + "?" + paramName + "=" + urlEncoded(data)
+    // Build URL:
+    // Path mode:  base URL contains "{data}" → replace placeholder with URL-encoded scan content
+    // Query mode: no placeholder             → append ?paramName=urlEncoded(data)
     String url = baseURL;
-    url += (url.indexOf('?') < 0) ? "?" : "&";
-    url += paramName;
-    url += "=";
-    url += urlEncode(data);
+    if (url.indexOf("{data}") >= 0) {
+        url.replace("{data}", urlEncode(data));
+    } else {
+        url += (url.indexOf('?') < 0) ? "?" : "&";
+        url += paramName;
+        url += "=";
+        url += urlEncode(data);
+    }
 
     Serial.printf("[HTTP] GET %s\n", url.c_str());
 

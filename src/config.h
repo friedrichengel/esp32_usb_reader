@@ -23,6 +23,8 @@
 #define KEY_STATIC_SN    "static_sn"
 #define KEY_STATIC_GW    "static_gw"
 #define KEY_STATIC_DNS   "static_dns"
+#define KEY_AUTO_RESTART "auto_rst"
+#define KEY_HTTPS_ENABLED "https_en"
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 #define DEFAULT_URL_PARAM  "data"
@@ -52,6 +54,10 @@ public:
     String staticSubnet;
     String staticGateway;
     String staticDNS;
+
+    // System
+    int    autoRestartMin; // 0 = deaktiviert, sonst Minuten (15/30/45/60)
+    bool   httpsEnabled;   // true = HTTPS (Standard), false = plain HTTP
 
     ConfigManager();
 

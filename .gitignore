@@ -57,3 +57,7 @@ dkms.conf
 # PlatformIO
 .pio/
 .vscode/
+
+# Lokale Notizen / Claude-Settings
+dinge
+.claude/settings.local.json

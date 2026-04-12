@@ -345,6 +345,23 @@ static esp_err_t sendSettingsPage(PsychicRequest* req, PsychicResponse* res,
   </select>
   <p class="info" style="margin-top:8px">Welches Abschlusszeichen der Scanner nach dem Code sendet. Bei &bdquo;Kein Abschlusszeichen&ldquo; wird nach 300&thinsp;ms Stille ausgel&ouml;st.</p>
 
+  <h2>System</h2>
+  <label>Automatischer Neustart</label>
+  <select name="auto_restart">
+    <option value="0")delim"   + (Config.autoRestartMin == 0  ? " selected" : "") + R"delim(>Nie</option>
+    <option value="15")delim"  + (Config.autoRestartMin == 15 ? " selected" : "") + R"delim(>Alle 15 Minuten</option>
+    <option value="30")delim"  + (Config.autoRestartMin == 30 ? " selected" : "") + R"delim(>Alle 30 Minuten</option>
+    <option value="45")delim"  + (Config.autoRestartMin == 45 ? " selected" : "") + R"delim(>Alle 45 Minuten</option>
+    <option value="60")delim"  + (Config.autoRestartMin == 60 ? " selected" : "") + R"delim(>Alle 60 Minuten</option>
+  </select>
+  <p class="info" style="margin-top:8px">Das Ger&auml;t startet automatisch nach dem gew&auml;hlten Intervall neu. Der Timer l&auml;uft ab dem letzten Bootvorgang.</p>
+
+  <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <input type="checkbox" name="https_enabled" value="1")delim" + (Config.httpsEnabled ? " checked" : "") + R"delim( style="width:auto;margin:0">
+    <span>HTTPS aktivieren (Port 443, empfohlen)</span>
+  </label>
+  <p class="info" style="margin-top:-10px">Bei deaktiviertem HTTPS ist die Konfigurationsseite &uuml;ber Port 80 unverschl&uuml;sselt erreichbar. Scan-Callback-URLs k&ouml;nnen unabh&auml;ngig davon weiterhin HTTPS-Ziele verwenden. &Auml;nderung wird erst nach einem Neustart wirksam.</p>
+
   <h2>Passwort &auml;ndern</h2>
   <label>Neues Passwort (leer = unver&auml;ndert, mind. 6 Zeichen)</label>
   <input type="password" name="new_pass" autocomplete="new-password">
@@ -424,6 +441,16 @@ static esp_err_t handleSettingsPost(PsychicRequest* req, PsychicResponse* res) {
         if (!staticGw.isEmpty())  Config.staticGateway = staticGw;
         if (!staticDns.isEmpty()) Config.staticDNS     = staticDns;
     }
+
+    // Auto-restart (0 = off; only accept allowed values)
+    {
+        int ar = param(req, "auto_restart").toInt();
+        if (ar == 0 || ar == 15 || ar == 30 || ar == 45 || ar == 60)
+            Config.autoRestartMin = ar;
+    }
+
+    // HTTPS toggle (checkbox: present = enabled, absent = disabled)
+    Config.httpsEnabled = req->hasParam("https_enabled");
 
     Config.save();
 
@@ -912,7 +939,12 @@ void WebServerManager::begin() {
             staIP = WiFi.localIP().toString();
     }
 
-    bool hasCert = loadOrCreateCert(g_certPEM, g_keyPEM, staIP);
+    bool hasCert = false;
+    if (Config.httpsEnabled) {
+        hasCert = loadOrCreateCert(g_certPEM, g_keyPEM, staIP);
+    } else {
+        Serial.println("[WebSrv] HTTPS disabled by config – starting plain HTTP");
+    }
 
     if (hasCert) {
         // ── HTTPS server (port 443) ──────────────────────────────────────────

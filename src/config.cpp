@@ -7,7 +7,8 @@ ConfigManager Config;
 // ─── Constructor ─────────────────────────────────────────────────────────────
 ConfigManager::ConfigManager()
     : urlParam(DEFAULT_URL_PARAM), scanTerminator("crlf"), kbLayout("de"), setupDone(false),
-      dhcpEnabled(true), staticSubnet("255.255.255.0"), staticDNS("8.8.8.8") {}
+      dhcpEnabled(true), staticSubnet("255.255.255.0"), staticDNS("8.8.8.8"),
+      autoRestartMin(0), httpsEnabled(true) {}
 
 // ─── load() ──────────────────────────────────────────────────────────────────
 void ConfigManager::load() {
@@ -28,6 +29,8 @@ void ConfigManager::load() {
     staticSubnet  = prefs.getString(KEY_STATIC_SN,  "255.255.255.0");
     staticGateway = prefs.getString(KEY_STATIC_GW,  "");
     staticDNS     = prefs.getString(KEY_STATIC_DNS, "8.8.8.8");
+    autoRestartMin= prefs.getInt   (KEY_AUTO_RESTART, 0);
+    httpsEnabled  = prefs.getBool  (KEY_HTTPS_ENABLED, true);
 
     prefs.end();
 
@@ -54,6 +57,8 @@ void ConfigManager::save() {
     prefs.putString(KEY_STATIC_SN,  staticSubnet);
     prefs.putString(KEY_STATIC_GW,  staticGateway);
     prefs.putString(KEY_STATIC_DNS, staticDNS);
+    prefs.putInt   (KEY_AUTO_RESTART, autoRestartMin);
+    prefs.putBool  (KEY_HTTPS_ENABLED, httpsEnabled);
 
     prefs.end();
     Serial.println("[Config] Saved.");
@@ -81,6 +86,8 @@ void ConfigManager::factoryReset() {
     staticSubnet  = "255.255.255.0";
     staticGateway = "";
     staticDNS     = "8.8.8.8";
+    autoRestartMin= 0;
+    httpsEnabled  = true;
 
     Serial.println("[Config] Factory reset done.");
 }

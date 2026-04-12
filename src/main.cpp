@@ -195,6 +195,18 @@ void loop() {
         ESP.restart();
     }
 
+    // Automatischer Neustart nach konfiguriertem Intervall
+    if (Config.autoRestartMin > 0) {
+        static uint32_t autoRestartStart = millis();
+        uint32_t interval = (uint32_t)Config.autoRestartMin * 60UL * 1000UL;
+        if (millis() - autoRestartStart >= interval) {
+            Serial.printf("[Main] Automatischer Neustart nach %d Minuten\n", Config.autoRestartMin);
+            AppLogger.add("SYS", "Automatischer Neustart nach %d min", Config.autoRestartMin);
+            delay(500);
+            ESP.restart();
+        }
+    }
+
     // Drive the HTTPS/HTTP server event loop
     WebSrv.loop();
 

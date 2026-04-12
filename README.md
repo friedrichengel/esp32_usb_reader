@@ -335,3 +335,7 @@ perl debug_tools/perl/http_logger.pl 8080
 ## SSL-Hinweis
 
 Da das Zertifikat selbst-signiert ist, zeigt jeder Browser eine Sicherheitswarnung. Das Zertifikat kann über **`/cert`** als `.pem`-Datei heruntergeladen und einmalig im Betriebssystem oder Browser als vertrauenswürdig hinterlegt werden (Details siehe Abschnitt „Zertifikat installieren" oben). Danach erscheint keine Warnung mehr.
+
+## Lizenz
+
+Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).
